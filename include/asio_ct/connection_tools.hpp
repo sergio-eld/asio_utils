@@ -1,6 +1,11 @@
 ﻿#pragma once
 
 #include <type_traits>
+#include <iterator>
+#include <queue>
+#include <atomic>
+#include <mutex>
+
 #include <chrono>
 #include <future>
 #include <functional>
@@ -17,6 +22,20 @@ namespace eld
         template<typename SteadyTimer>
         using require_steady_timer = typename
                 std::enable_if<std::is_same<SteadyTimer, asio::steady_timer>::value>::type;
+
+        template<typename POD>
+        using require_pod = typename std::enable_if<std::is_pod<POD>::value>::type;
+
+        template<typename Iter>
+        constexpr bool check_random_iter()
+        {
+            return std::is_same<typename std::iterator_traits<Iter>::value_type, uint8_t>() &&
+                   std::is_same<typename std::iterator_traits<Iter>::iterator_category,
+                           std::random_access_iterator_tag>();
+        }
+
+        template<typename Iter>
+        using require_iter = typename std::enable_if<check_random_iter<Iter>()>::type;
     }
 
     template<typename Connection>
@@ -151,7 +170,9 @@ namespace eld
         }
     };
 
-    template<typename Connection, typename SteadyTimer>
+    template<typename Connection,
+            typename SteadyTimer,
+            typename = detail::require_steady_timer<SteadyTimer>>
     auto make_connection_attempt(Connection &connection,
                                  SteadyTimer &&steadyTimer) -> connection_attempt<Connection>
     {
@@ -160,7 +181,8 @@ namespace eld
 
     template<typename Connection,
             typename SteadyTimer,
-            typename Callable>
+            typename Callable,
+            typename = detail::require_steady_timer<SteadyTimer>>
     auto make_connection_attempt(Connection &connection,
                                  SteadyTimer &&steadyTimer,
                                  Callable &&stopOnError) -> connection_attempt<Connection>
@@ -169,4 +191,53 @@ namespace eld
                                               std::forward<SteadyTimer>(steadyTimer),
                                               std::forward<Callable>(stopOnError));
     }
+
+    class send_queue
+    {
+    public:
+        using command_t = std::pair<asio::const_buffer,
+                std::function<void(const asio::error_code &, size_t)>>;
+
+        template<typename ConstBuffer, typename Callable>
+        void push(ConstBuffer &&buffer, Callable &&onSent)
+        {
+            std::lock_guard<std::mutex> lockGuard{queueMutex_};
+            if (isPendingPromise_)
+            {
+                pendingCommand_.set_value(command_t(std::forward<ConstBuffer>(buffer),
+                                                    std::forward<Callable>(onSent)));
+                isPendingPromise_ = false;
+                return;
+            }
+
+            sendQueue_.emplace(std::forward<ConstBuffer>(buffer),
+                               std::forward<Callable>(onSent));
+        }
+
+
+        // only one consumer invokes this (not asynchronously)
+        std::future<command_t> pop()
+        {
+            std::lock_guard<std::mutex> lockGuard{queueMutex_};
+            if (!sendQueue_.empty())
+            {
+                std::promise<command_t> promise{};
+                promise.set_value(std::move(sendQueue_.front()));
+                sendQueue_.pop();
+                return promise.get_future();
+            }
+
+            assert(!isPendingPromise_ && "isPendingPromise_ must be false here");
+            isPendingPromise_ = true;
+            pendingCommand_ = {};
+            return pendingCommand_.get_future();
+        }
+
+    private:
+        std::queue<command_t> sendQueue_;
+        std::mutex queueMutex_;
+        std::promise<command_t> pendingCommand_;
+        std::atomic_bool isPendingPromise_{false};
+    };
+
 }

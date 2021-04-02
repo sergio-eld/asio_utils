@@ -37,10 +37,7 @@ int main()
 
     asio::ip::tcp::socket client{io_context};
 
-    asio::steady_timer timer{io_context};
-    timer.expires_after(std::chrono::seconds(5));
     auto connectionAttempt = make_connection_attempt(client,
-                                                     asio::steady_timer(io_context),
                                                      [](const asio::error_code &errorCode)
                                                      {
                                                          std::cout << errorCode.message() << std::endl;
@@ -49,7 +46,7 @@ int main()
 
     auto res = connectionAttempt(asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"),
                                                          12000),
-                                 2);
+                                 std::chrono::milliseconds(20));
 
     auto threads = {
             std::async(std::launch::async, runContext),

@@ -17,11 +17,17 @@
 
 namespace eld
 {
+    namespace traits
+    {
+        template<typename Connection>
+        using endpoint_type = typename Connection::endpoint_type;
+    }
+
     namespace detail
     {
         template<typename SteadyTimer>
         using require_steady_timer = typename
-                std::enable_if<std::is_same<SteadyTimer, asio::steady_timer>::value>::type;
+        std::enable_if<std::is_same<SteadyTimer, asio::steady_timer>::value>::type;
 
         template<typename POD>
         using require_pod = typename std::enable_if<std::is_pod<POD>::value>::type;
@@ -36,8 +42,33 @@ namespace eld
 
         template<typename Iter>
         using require_iter = typename std::enable_if<check_random_iter<Iter>()>::type;
+
+
+        template<typename Endpoint, typename Connection>
+        using require_endpoint = typename std::enable_if<std::is_same<Endpoint,
+                traits::endpoint_type<Connection>>::value>::type;
     }
 
+
+    // TODO: make_connection_attempts as a non-persistent composed task
+    // TODO: require duration
+    // version with synchronization
+    // connections strand is used
+//    template<typename Connection,
+//            typename Endpoint,
+//            typename Duration,
+//            typename = detail::require_endpoint<Endpoint, Connection>>
+//    std::future<Connection> make_connection_attempt(Connection &&connection,
+//                                                    Endpoint &&endpoint,
+//                                                    Duration &&timeout, // may be defaulted
+//                                                    size_t attempts
+//                                                    )
+//    {
+//
+//    };
+
+
+    // TODO: functional non-persistent object
     template<typename Connection>
     class connection_attempt
     {
@@ -58,77 +89,72 @@ namespace eld
             return size_t() - 1;
         }
 
-        template<typename SteadyTimer, typename = detail::require_steady_timer<SteadyTimer>>
-        explicit connection_attempt(Connection &connection, SteadyTimer &&timer)
-                : connection_(connection),
-                  timer_(std::forward<SteadyTimer>(timer))
+        explicit connection_attempt(Connection &connection)
+                : connection_(connection)
         {}
 
-        template<typename SteadyTimer, typename Callable>
+        template<typename Callable>
         explicit connection_attempt(Connection &connection,
-                                    SteadyTimer &&timer,
                                     Callable &&stopOnError)
                 : connection_(connection),
-                  timer_(std::forward<SteadyTimer>(timer)),
                   stopOnError_(std::forward<Callable>(stopOnError))
         {}
 
-        template<typename Endpoint, typename = require_endpoint<Endpoint>>
+        template<typename Endpoint,
+                typename Duration,
+                typename = require_endpoint<Endpoint>>
         std::future<bool> operator()(Endpoint &&endpoint,
                                      size_t attempts,
-                                     std::chrono::milliseconds timeout = default_timeout())
+                                     Duration &&timeout = default_timeout())
         {
             connectionResult_ = {};
             asyncConnect(std::forward<Endpoint>(endpoint),
                          attempts,
-                         timeout);
+                         std::forward<Duration>(timeout));
             return connectionResult_.get_future();
         }
 
         // default attempts = infinite_attempts
         template<typename Endpoint,
+                typename Duration,
                 typename = require_endpoint<Endpoint>>
         std::future<bool> operator()(Endpoint endpoint,
-                                     std::chrono::milliseconds timeout = default_timeout())
+                                     Duration &&timeout = default_timeout())
         {
             connectionResult_ = {};
             asyncConnect(std::forward<Endpoint>(endpoint),
                          infinite_attempts(),
-                         timeout);
+                         std::forward<Duration>(timeout));
             return connectionResult_.get_future();
         }
 
     private:
         connection_type &connection_;
-        asio::steady_timer timer_;
+        asio::steady_timer timer_
+                {connection_.get_executor()}; // this does not compile -> {asio::get_associated_executor(connection_)};
+
         std::function<bool(const asio::error_code &)> stopOnError_;
         std::promise<bool> connectionResult_;
 
-        template <typename Duration>
+        // cancels the connection on timeout!
+        template<typename Duration>
         void startTimer(const Duration &timeout)
         {
-            timer_.expires_after(timeout);
-            timer_.async_wait([this, timeout](const asio::error_code &errorCode)
-                              {
-                                  if (!errorCode &&
-                                      stopOnError_ &&
-                                      stopOnError_(asio::error::timed_out))
-                                  {
-                                      connection_.cancel();
-                                      return;
-                                  }
+            timer_.expires_after(timeout); // it will automatically cancel a pending timer
 
-                                  if (errorCode == asio::error::operation_aborted)
-                                      return;
+            timer_.async_wait(
+                    [this, timeout](const asio::error_code &errorCode)
+                    {
+                        // will occur on connection error before timeout
+                        if (errorCode == asio::error::operation_aborted)
+                            return;
 
-                                  if (errorCode)
-                                  {
-                                      // TODO: handle timer errors? I guess there should be none
-                                      std::cerr << "Timer error: " << errorCode << std::endl;
-                                  }
+                        // TODO: handle timer errors? What are the possible errors?
+                        assert(!errorCode && "unexpected timer error!");
 
-                                  startTimer(timeout);
-                              });
+                        // stop attempts
+                        connection_.cancel();
+                    });
         }
 
         void stopTimer()
@@ -136,32 +162,41 @@ namespace eld
             timer_.cancel();
         }
 
-        template <typename Duration>
+        /**
+         * Will be trying to connect until:<br>
+         * - has run out of attempts
+         * - has been required to stop by stopOnError callback (if it was set)
+         * @param endpoint
+         * @param attempts
+         */
+        template<typename Duration>
         void asyncConnect(endpoint_type endpoint,
                           size_t attempts,
-                          const Duration &timeout)
+                          Duration &&timeout)
         {
             startTimer(timeout);
 
             connection_.async_connect(endpoint, [this,
                     endpoint,
                     attempts,
-                    timeout](const asio::error_code &errorCode)
+                    timeout = std::forward<Duration>(timeout)](const asio::error_code &errorCode)
             {
-                if (!errorCode)
-                    return stopTimer(),
-                            connectionResult_.set_value(true);
-
                 const auto attemptsLeft = attempts == infinite_attempts() ?
                                           infinite_attempts() :
                                           attempts - 1;
 
-                // would it catch interrupted operation on cancel?
                 if ((stopOnError_ &&
-                     stopOnError_(errorCode)) ||
+                     stopOnError_(errorCode == asio::error::operation_aborted ?
+                                  // special case for operation_aborted on timer expiration - need to send timed_out explicitly
+                                  // this should only be resulted from the timer calling cancel()
+                                  asio::error::timed_out :
+                                  errorCode)) ||
                     !attemptsLeft)
-                    return stopTimer(),
-                            connectionResult_.set_value(false);
+                {
+                    stopTimer();
+                    connectionResult_.set_value(false);
+                    return;
+                }
 
                 asyncConnect(endpoint,
                              attemptsLeft,
@@ -170,25 +205,18 @@ namespace eld
         }
     };
 
-    template<typename Connection,
-            typename SteadyTimer,
-            typename = detail::require_steady_timer<SteadyTimer>>
-    auto make_connection_attempt(Connection &connection,
-                                 SteadyTimer &&steadyTimer) -> connection_attempt<Connection>
+    template<typename Connection>
+    auto make_connection_attempt(Connection &connection) -> connection_attempt<Connection>
     {
-        return connection_attempt<Connection>(connection, std::forward<SteadyTimer>(steadyTimer));
+        return connection_attempt<Connection>(connection);
     }
 
     template<typename Connection,
-            typename SteadyTimer,
-            typename Callable,
-            typename = detail::require_steady_timer<SteadyTimer>>
+            typename Callable>
     auto make_connection_attempt(Connection &connection,
-                                 SteadyTimer &&steadyTimer,
                                  Callable &&stopOnError) -> connection_attempt<Connection>
     {
         return connection_attempt<Connection>(connection,
-                                              std::forward<SteadyTimer>(steadyTimer),
                                               std::forward<Callable>(stopOnError));
     }
 

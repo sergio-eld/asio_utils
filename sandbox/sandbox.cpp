@@ -25,17 +25,22 @@ int main()
 
     };
 
-    // auto workGuard = asio::make_work_guard(io_context);
-//    ConnectionLogic connectionLogic{io_context,
-//                                    {asio::ip::make_address_v4("127.0.0.1"),
-//                                     12000}};
-
-//    connectionLogic.setLogger([](const char *msg)
-//                              {
-//                                  std::cout << msg << std::endl;
-//                              });
-
     asio::ip::tcp::socket client{io_context};
+
+    auto composedAttempt = make_composed_connection_attempt(client,
+                                                            [](const asio::error_code &) {},
+                                                            [](const asio::error_code &) -> bool { return false; });
+
+    std::future<void> future = async_connection_attempt(client,
+                             asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"),
+                                                     12000),
+                             1,
+                             std::chrono::milliseconds(20),
+                             asio::use_future,
+                             [](const asio::error_code &) -> bool
+                             {
+                                 return false;
+                             });
 
     auto connectionAttempt = make_connection_attempt(client,
                                                      [](const asio::error_code &errorCode)
@@ -43,6 +48,7 @@ int main()
                                                          std::cout << errorCode.message() << std::endl;
                                                          return false;
                                                      });
+
 
     auto res = connectionAttempt(asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"),
                                                          12000),
@@ -59,4 +65,5 @@ int main()
     // TODO: abort connection
     // TODO: connection time out
 
-    return 0;}
+    return 0;
+}

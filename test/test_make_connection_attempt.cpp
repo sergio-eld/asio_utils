@@ -25,12 +25,17 @@ public:
 
     void startAccepting()
     {
+        accepting_ = true;
         acceptor_.async_accept(
                 [this](const asio::error_code &errorCode,
                        asio::ip::tcp::socket peer)
                 {
                     if (!errorCode)
+                    {
+                        if (!accepting_)
+                            return;
                         startAccepting();
+                    }
                     if (errorCode == asio::error::operation_aborted)
                     {
                         return;
@@ -45,12 +50,14 @@ public:
 
     void stop()
     {
+        accepting_ = false;
+        std::thread([this](){acceptor_.cancel();}).detach();
         // acceptor_.cancel();
-        asio::post(acceptor_.get_executor(), [this](){acceptor_.cancel();});
     }
 
 private:
     asio::ip::tcp::acceptor acceptor_;
+    std::atomic_bool accepting_{false};
 };
 
 void runContext(asio::io_context &io_context)
@@ -165,7 +172,6 @@ TEST(connection_attempt, connection_succeeded)
 
     ASSERT_NO_THROW(res.get());
 
-    // std::this_thread::sleep_for(std::chrono::milliseconds(20));
     server.stop();
     ASSERT_EQ(attempts, 1);
 }

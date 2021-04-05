@@ -35,7 +35,12 @@ if (${ASIO_FOUND})
             INTERFACE_INCLUDE_DIRECTORIES ${ASIO_INCLUDE_DIR})
 
     if(WIN32)
-        target_link_libraries(ASIO::ASIO INTERFACE Threads::Threads ws2_32.lib)
+        target_link_libraries(ASIO::ASIO
+                INTERFACE
+                Threads::Threads
+                ws2_32.lib
+                mswsock.lib
+                )
     endif()
 
         message(STATUS "Asio include dir: ${ASIO_INCLUDE_DIR}")

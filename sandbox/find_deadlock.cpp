@@ -29,7 +29,7 @@ class server
 public:
 
     template<typename Executor>
-    explicit server(Executor &executor)
+    explicit server(Executor executor)
             : acceptor_(executor)
     {
         using asio::ip::tcp;
@@ -43,12 +43,15 @@ public:
 
     void startAccepting()
     {
+        accepting_ = true;
         acceptor_.async_accept(
                 [this](const asio::error_code &errorCode,
                        asio::ip::tcp::socket peer)
                 {
                     if (!errorCode)
                     {
+                         if (!accepting_)
+                            return;
                         startAccepting();
                         std::cout << "Connection accepted:" << peer.remote_endpoint() << std::endl;
                     }
@@ -67,13 +70,21 @@ public:
 
     void stop()
     {
-        // asio::post(acceptor_.get_executor(), [this](){acceptor_.cancel();}); // this line fixes deadlock
-        acceptor_.cancel();
+        using asio::ip::tcp;
+        accepting_ = false;
+//         acceptor_.cancel();
+        std::thread{[this](){acceptor_.cancel();}}.detach();
+//        asio::post(acceptor_.get_executor(), [this]()
+//        {
+//
+//            acceptor_.cancel();
+//        });        // acceptor_.cancel();
         // acceptor_.close(); // this line also fixes deadlock
     }
 
 private:
     asio::ip::tcp::acceptor acceptor_;
+    std::atomic_bool accepting_{false};
 };
 
 int main()
@@ -84,13 +95,14 @@ int main()
     // run server
     auto serverStrand = asio::make_strand(context);
     server server{serverStrand};
+//    server server{asio::make_strand(context)};
     server.startAccepting();
 
     // run client
-    auto clientStrand = asio::make_strand(context);
-    asio::ip::tcp::socket socket{clientStrand};
+//    auto clientStrand = asio::make_strand(context);
+//    asio::ip::tcp::socket socket{clientStrand};
+    asio::ip::tcp::socket socket{asio::make_strand(context)};
 
-    size_t attempts = 1;
     auto endpoint = asio::ip::tcp::endpoint(
             asio::ip::make_address_v4(localhost), port);
 
@@ -102,9 +114,9 @@ int main()
     };
 
     res.get();
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     server.stop();
     std::cout << "Server has been requested to stop" << std::endl;
+
 
     return 0;
 }

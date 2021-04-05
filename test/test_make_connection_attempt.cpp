@@ -45,7 +45,8 @@ public:
 
     void stop()
     {
-        acceptor_.cancel();
+        // acceptor_.cancel();
+        asio::post(acceptor_.get_executor(), [this](){acceptor_.cancel();});
     }
 
 private:
@@ -164,7 +165,7 @@ TEST(connection_attempt, connection_succeeded)
 
     ASSERT_NO_THROW(res.get());
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // std::this_thread::sleep_for(std::chrono::milliseconds(20));
     server.stop();
     ASSERT_EQ(attempts, 1);
 }

@@ -50,11 +50,11 @@ public:
                     if (!errorCode)
                     {
                         startAccepting();
-//                        std::cout << "Connection accepted\n";
+                        std::cout << "Connection accepted:" << peer.remote_endpoint() << std::endl;
                     }
                     if (errorCode == asio::error::operation_aborted)
                     {
-//                        std::cout << "Stopped accepting connections\n";
+                        std::cout << "Stopped accepting connections\n";
                         return;
                     }
                 });
@@ -102,6 +102,7 @@ int main()
     };
 
     res.get();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     server.stop();
     std::cout << "Server has been requested to stop" << std::endl;
 

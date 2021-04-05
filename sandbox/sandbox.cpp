@@ -53,18 +53,6 @@ int main()
                                  return false;
                              });
 
-    auto connectionAttempt = make_connection_attempt(client,
-                                                     [](const asio::error_code &errorCode)
-                                                     {
-                                                         std::cout << errorCode.message() << std::endl;
-                                                         return false;
-                                                     });
-
-
-    auto res = connectionAttempt(asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"),
-                                                         12000),
-                                 std::chrono::milliseconds(20));
-
     auto threads = {
             std::async(std::launch::async, runContext),
             std::async(std::launch::async, runContext)

@@ -45,9 +45,7 @@ public:
 
     void stop()
     {
-        // asio::post(acceptor_.get_executor(), [this](){acceptor_.cancel();});
-        acceptor_.cancel(); // this might cause deadlock
-        acceptor_.close();
+        acceptor_.cancel();
     }
 
 private:
@@ -166,6 +164,7 @@ TEST(connection_attempt, connection_succeeded)
 
     ASSERT_NO_THROW(res.get());
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     server.stop();
     ASSERT_EQ(attempts, 1);
 }

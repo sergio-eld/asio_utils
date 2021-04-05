@@ -51,33 +51,6 @@ namespace eld
     }
 
 
-    // TODO: make_connection_attempts as a non-persistent composed task
-    // TODO: require duration
-    // version with synchronization
-    // connections strand is used
-//    template<typename Connection,
-//            typename Endpoint,
-//            typename Duration,
-//            typename = detail::require_endpoint<Endpoint, Connection>>
-//    std::future<Connection> make_connection_attempt(Connection &&connection,
-//                                                    Endpoint &&endpoint,
-//                                                    Duration &&timeout, // may be defaulted
-//                                                    size_t attempts
-//                                                    )
-//    {
-//
-//    };
-
-
-    /*
-     * - start timer
-     * - start connection
-     * - receive timer error
-     *   - timeout -> cancel connection
-     *   - timer cancelled on connection error
-     * - receive connection error
-     */
-
     template<typename Connection, typename CompletionHandler>
     class composed_connection_attempt
     {
@@ -137,21 +110,56 @@ namespace eld
                                                 std::forward<Callable>(stopOnError)))
         {}
 
-        // operator for initiation
+        /**
+         * Initiation operator. Initiates composed connection procedure.
+         * @tparam Endpoint type of endpoint
+         * @tparam Duration type of timeout
+         * @param endpoint endpoint to be used for connection
+         * @param attempts number of attempts
+         * @param timeout value to be used as a timeout between attempts
+         */
+        // TODO: require endpoint type
         template<typename Endpoint, typename Duration>
         void operator()(Endpoint &&endpoint,
                         size_t attempts,
-                        Duration timeout = default_timeout())
+                        Duration &&timeout = default_timeout())
         {
             pImpl_->endpoint_ = std::forward<Endpoint>(endpoint);
             pImpl_->attempts_ = attempts;
-            pImpl_->timeout_ = timeout;
+            pImpl_->timeout_ = std::forward<Duration>(timeout);
 
             asyncConnect();
         }
 
-        // intermediate completion handler
-        // will be invoked only by the socket/connection
+        /**
+         * Initiation operator. Initiates composed connection procedure. Connection attempts default to infinite.
+         * @tparam Endpoint type of endpoint
+         * @tparam Duration type of timeout
+         * @param endpoint endpoint to be used for connection
+         * @param timeout value to be used as a timeout between attempts
+         */
+        // TODO: require endpoint type
+        template<typename Endpoint, typename Duration>
+        void operator()(Endpoint &&endpoint,
+                        Duration &&timeout = default_timeout())
+        {
+            pImpl_->endpoint_ = std::forward<Endpoint>(endpoint);
+            pImpl_->timeout_ = std::forward<Duration>(timeout);
+
+            asyncConnect();
+        }
+
+        /**
+         * Intermediate completion handler. Will be trying to connect until:<br>
+         * - has connected<br>
+         * - has run out of attempts<br>
+         * - user-provided callback #impl::stopOnError_ interrupts execution when a specific connection error has occurred<br>
+         * <br>Will be invoked only on connection events:<br>
+         * - success<br>
+         * - connection timeout or operation_cancelled in case if timer has expired<br>
+         * - connection errors<br>
+         * @param errorCode error code resulted from async_connect
+         */
         void operator()(const asio::error_code &errorCode)
         {
             if (!errorCode)
@@ -297,6 +305,7 @@ namespace eld
                                   Callable &&stopOnError)
     {
 
+        // TODO: get rid of lambda
         auto initiation = [](auto &&completion_handler,
                              Connection &connection,
                              Endpoint &&endpoint,
@@ -323,6 +332,45 @@ namespace eld
                 std::ref(connection),
                 std::forward<Endpoint>(endpoint),
                 attempts,
+                std::forward<Duration>(timeout),
+                std::forward<Callable>(stopOnError));
+    }
+
+    template<typename Connection,
+            typename Endpoint,
+            typename Duration,
+            typename CompletionToken,
+            typename Callable>
+    auto async_connection_attempt(Connection &connection,
+                                  Endpoint &&endpoint,
+                                  Duration &&timeout,
+                                  CompletionToken &&completionToken,
+                                  Callable &&stopOnError)
+    {
+        // TODO: get rid of boilerplate
+        auto initiation = [](auto &&completion_handler,
+                             Connection &connection,
+                             Endpoint &&endpoint,
+                             Duration &&timeout,
+                             Callable &&stopOnError)
+        {
+            using completion_handler_t = typename
+            std::decay<decltype(completion_handler)>::type;
+
+            auto composedConnectionAttempt = make_composed_connection_attempt(
+                    connection,
+                    std::forward<completion_handler_t>(completion_handler),
+                    std::forward<Callable>(stopOnError));
+
+            composedConnectionAttempt(std::forward<Endpoint>(endpoint),
+                                      std::forward<Duration>(timeout));
+        };
+
+        return asio::async_initiate<CompletionToken, void(asio::error_code)>(
+                initiation,
+                completionToken,
+                std::ref(connection),
+                std::forward<Endpoint>(endpoint),
                 std::forward<Duration>(timeout),
                 std::forward<Callable>(stopOnError));
     }

@@ -42,6 +42,17 @@ int main()
                                  return false;
                              });
 
+    async_connection_attempt(client,
+                             asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"),
+                                                     12000),
+                             1,
+                             std::chrono::milliseconds(20),
+                             [](const asio::error_code&){},
+                             [](const asio::error_code &) -> bool
+                             {
+                                 return false;
+                             });
+
     auto connectionAttempt = make_connection_attempt(client,
                                                      [](const asio::error_code &errorCode)
                                                      {

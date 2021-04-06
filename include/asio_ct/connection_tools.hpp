@@ -51,6 +51,7 @@ namespace eld
     }
 
 
+    // TODO: move to eld::detail?
     template<typename Connection, typename CompletionHandler>
     class composed_connection_attempt
     {
@@ -320,36 +321,6 @@ namespace eld
                                   std::forward<Duration>(timeout));
 
         return result.get();
-
-//        // TODO: get rid of lambda
-//        auto initiation = [](auto &&completion_handler,
-//                             Connection &connection,
-//                             Endpoint &&endpoint,
-//                             size_t attempts,
-//                             Duration &&timeout,
-//                             Callable &&stopOnError)
-//        {
-//            using completion_handler_t = typename
-//            std::decay<decltype(completion_handler)>::type;
-//
-//            auto composedConnectionAttempt = make_composed_connection_attempt(
-//                    connection,
-//                    std::forward<completion_handler_t>(completion_handler),
-//                    std::forward<Callable>(stopOnError));
-//
-//            composedConnectionAttempt(std::forward<Endpoint>(endpoint),
-//                                      attempts,
-//                                      std::forward<Duration>(timeout));
-//        };
-//
-//        return asio::async_initiate<CompletionToken, void(asio::error_code)>(
-//                initiation,
-//                completionToken,
-//                std::ref(connection),
-//                std::forward<Endpoint>(endpoint),
-//                attempts,
-//                std::forward<Duration>(timeout),
-//                std::forward<Callable>(stopOnError));
     }
 
     template<typename Connection,
@@ -378,33 +349,6 @@ namespace eld
                                   std::forward<Duration>(timeout));
 
         return result.get();
-
-        // TODO: get rid of boilerplate
-//        auto initiation = [](auto &&completion_handler,
-//                             Connection &connection,
-//                             Endpoint &&endpoint,
-//                             Duration &&timeout,
-//                             Callable &&stopOnError)
-//        {
-//            using completion_handler_t = typename
-//            std::decay<decltype(completion_handler)>::type;
-//
-//            auto composedConnectionAttempt = make_composed_connection_attempt(
-//                    connection,
-//                    std::forward<completion_handler_t>(completion_handler),
-//                    std::forward<Callable>(stopOnError));
-//
-//            composedConnectionAttempt(std::forward<Endpoint>(endpoint),
-//                                      std::forward<Duration>(timeout));
-//        };
-//
-//        return asio::async_initiate<CompletionToken, void(asio::error_code)>(
-//                initiation,
-//                completionToken,
-//                std::ref(connection),
-//                std::forward<Endpoint>(endpoint),
-//                std::forward<Duration>(timeout),
-//                std::forward<Callable>(stopOnError));
     }
 
     class send_queue

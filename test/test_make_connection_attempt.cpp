@@ -1,7 +1,7 @@
 ﻿
 #include <gtest/gtest.h>
 
-#include "asio_ct/connection_tools.hpp"
+#include "asio_utils/connection_tools.hpp"
 
 constexpr const char localhost[] = "127.0.0.1";
 constexpr unsigned short port = 12000;
@@ -58,6 +58,8 @@ public:
 private:
     asio::ip::tcp::acceptor acceptor_;
     std::atomic_bool accepting_{false};
+
+    asio::ip::tcp::socket peer_{acceptor_.get_executor()};
 };
 
 void runContext(asio::io_context &io_context)
@@ -175,8 +177,6 @@ TEST(connection_attempt, connection_succeeded)
     server.stop();
     ASSERT_EQ(attempts, 1);
 }
-
-// TODO: successful connection
 // TODO: rejected connection
 
 // TODO: call connect twice while pending

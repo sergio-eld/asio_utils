@@ -43,21 +43,21 @@ public:
 
     void startAccepting()
     {
+        std::cout << "Start accepting\n";
         accepting_ = true;
         acceptor_.async_accept(
                 [this](const asio::error_code &errorCode,
                        asio::ip::tcp::socket peer)
                 {
+                    std::cout << "accepted: " << errorCode.message() << " " << std::this_thread::get_id() << std::endl;
                     if (!errorCode)
                     {
-                         if (!accepting_)
-                            return;
+//                        if (!accepting_)
+//                            return;
                         startAccepting();
-                        std::cout << "Connection accepted:" << peer.remote_endpoint() << std::endl;
                     }
                     if (errorCode == asio::error::operation_aborted)
                     {
-                        std::cout << "Stopped accepting connections\n";
                         return;
                     }
                 });
@@ -71,14 +71,16 @@ public:
     void stop()
     {
         using asio::ip::tcp;
-        accepting_ = false;
+//        acceptor_.cancel();
+//        accepting_ = false;
+       //  accepting_ = false;
 //         acceptor_.cancel();
-        std::thread{[this](){acceptor_.cancel();}}.detach();
-//        asio::post(acceptor_.get_executor(), [this]()
-//        {
-//
-//            acceptor_.cancel();
-//        });        // acceptor_.cancel();
+        // std::thread{[this](){acceptor_.cancel();}}.detach();
+        //accepting_ = false;
+        asio::post(acceptor_.get_executor(), [this]()
+        {
+            acceptor_.cancel();
+        });        // acceptor_.cancel();
         // acceptor_.close(); // this line also fixes deadlock
     }
 

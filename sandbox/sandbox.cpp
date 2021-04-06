@@ -1,5 +1,5 @@
 ﻿
-#include "asio_ct/connection_tools.hpp"
+#include "asio_utils/connection_tools.hpp"
 
 using namespace eld;
 
@@ -57,6 +57,10 @@ int main()
             std::async(std::launch::async, runContext),
             std::async(std::launch::async, runContext)
     };
+
+    auto continuation = [](const asio::error_code&){};
+    eld::persistent_send_dequeue<asio::ip::tcp::socket, decltype(continuation)> persistentSendDequeue{client, continuation};
+
 
     // TODO: run server
     // TODO: refuse connections

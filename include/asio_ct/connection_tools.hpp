@@ -292,6 +292,7 @@ namespace eld
                                                                           std::forward<Callable>(stopOnError));
     }
 
+    // TODO: specification for this function
     template<typename Connection,
             typename Endpoint,
             typename Duration,
@@ -304,36 +305,51 @@ namespace eld
                                   CompletionToken &&completionToken,
                                   Callable &&stopOnError)
     {
+        using result_t = asio::async_result<std::decay_t<CompletionToken>,
+                void(asio::error_code)>;
+        using completion_t = typename result_t::completion_handler_type;
 
-        // TODO: get rid of lambda
-        auto initiation = [](auto &&completion_handler,
-                             Connection &connection,
-                             Endpoint &&endpoint,
-                             size_t attempts,
-                             Duration &&timeout,
-                             Callable &&stopOnError)
-        {
-            using completion_handler_t = typename
-            std::decay<decltype(completion_handler)>::type;
+        completion_t completion{std::forward<CompletionToken>(completionToken)};
+        result_t result{completion};
 
-            auto composedConnectionAttempt = make_composed_connection_attempt(
-                    connection,
-                    std::forward<completion_handler_t>(completion_handler),
-                    std::forward<Callable>(stopOnError));
+        auto composedConnectionAttempt = make_composed_connection_attempt(connection,
+                                                                          std::forward<completion_t>(completion),
+                                                                          std::forward<Callable>(stopOnError));
+        composedConnectionAttempt(std::forward<Endpoint>(endpoint),
+                                  attempts,
+                                  std::forward<Duration>(timeout));
 
-            composedConnectionAttempt(std::forward<Endpoint>(endpoint),
-                                      attempts,
-                                      std::forward<Duration>(timeout));
-        };
+        return result.get();
 
-        return asio::async_initiate<CompletionToken, void(asio::error_code)>(
-                initiation,
-                completionToken,
-                std::ref(connection),
-                std::forward<Endpoint>(endpoint),
-                attempts,
-                std::forward<Duration>(timeout),
-                std::forward<Callable>(stopOnError));
+//        // TODO: get rid of lambda
+//        auto initiation = [](auto &&completion_handler,
+//                             Connection &connection,
+//                             Endpoint &&endpoint,
+//                             size_t attempts,
+//                             Duration &&timeout,
+//                             Callable &&stopOnError)
+//        {
+//            using completion_handler_t = typename
+//            std::decay<decltype(completion_handler)>::type;
+//
+//            auto composedConnectionAttempt = make_composed_connection_attempt(
+//                    connection,
+//                    std::forward<completion_handler_t>(completion_handler),
+//                    std::forward<Callable>(stopOnError));
+//
+//            composedConnectionAttempt(std::forward<Endpoint>(endpoint),
+//                                      attempts,
+//                                      std::forward<Duration>(timeout));
+//        };
+//
+//        return asio::async_initiate<CompletionToken, void(asio::error_code)>(
+//                initiation,
+//                completionToken,
+//                std::ref(connection),
+//                std::forward<Endpoint>(endpoint),
+//                attempts,
+//                std::forward<Duration>(timeout),
+//                std::forward<Callable>(stopOnError));
     }
 
     template<typename Connection,

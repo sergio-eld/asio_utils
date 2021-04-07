@@ -16,6 +16,305 @@
 
 #include <asio.hpp>
 
+/*
+ * continuation specification:
+ * First composed operation receives a callable handler object with a signature:
+ * void CompletionHandler::operator()(Signature);
+ *
+ * chained_continuation stores a callable "raw handler" that will be invoked.
+ * If no handler is set it stores the result into a shared state.
+ * Stored result in shared state is immediately transferred to the next callable with
+ * the same Signature once a new callable has been assigned.
+ * ?Callable is invoked only once?
+ *
+ * Result of a CompletionHandler is specialized with the first callback Signature.
+ *
+ * auto chainedContinuation = async_composed_operation(Args..., use_chained_token)
+ * auto nextChainedContinuation = async_continuation_chain(std::move(chainedContinuation), nextAsyncCallable);
+ */
+namespace eld
+{
+    struct chained_completion_t
+    {
+    };
+
+    chained_completion_t use_chained_completion;
+
+    /*
+     * 1) chain_handler invokes current node
+     * 2) current node invokes next node
+     * 3) next node invokes new operation
+     *
+     * async_op -> handler -> node -> next_node -> async_op -> handler
+     * node shares ownership of next_node
+     * next_node shares ownership of async_op
+     *
+     * TODO: ownership of previous nodes?
+     */
+
+    template<typename Signature>
+    struct chained_continuation_node_next_base;
+
+    template<typename ... Args>
+    struct chained_continuation_node_next_base<void(Args...)>
+    {
+        using signature_t = void(Args...);
+
+        virtual ~chained_continuation_node_next_base() = default;
+
+        virtual void operator()(Args...) = 0;
+    };
+
+    template<typename SignatureInput, typename Callable>
+    class chained_continuation_node_next;
+
+    // Callable must provide void operator()(void(Args...));
+    template<typename ... Args, typename Callable>
+    class chained_continuation_node_next<void(Args...), Callable> :
+            chained_continuation_node_next_base<void(Args...)>
+    {
+    public:
+
+        chained_continuation_node_next() = delete;
+
+        template<typename CallableT>
+        explicit chained_continuation_node_next(CallableT &&callable)
+                : callable_(std::forward<Callable>(callable))
+        {}
+
+        // TODO: no move or copy
+
+        // TODO: move args to callable?
+        void operator()(Args... args) override
+        {
+            callable_(args...);
+        }
+
+    private:
+        Callable callable_;
+    };
+
+    template<typename Signature>
+    class chained_continuation_node;
+
+    template<typename ... Args>
+    class chained_continuation_node<void(Args...)>
+    {
+    public:
+        using signature_t = void(Args...);
+
+        // next_t is not needed! Next continuation is produced via async_initiate(?)
+        using next_t = chained_continuation_node_next_base<signature_t>;
+
+        // TODO: force initialization with defaulted callback?
+
+        // invoke next node or store result
+        template<typename ... ArgsT>
+        void operator()(ArgsT &&... args)
+        {
+            std::lock_guard<std::mutex> lockGuard{mutex_};
+            if (next_)
+            {
+                (*next_)(std::forward<ArgsT>(args)...);
+                return;
+            }
+
+            // TODO: store result
+            storedResult_ = std::make_tuple(std::forward<ArgsT>(args)...);
+            ready_ = true;
+        }
+
+
+
+        void assign_next(std::shared_ptr<next_t> next)
+        {
+            assert(next && "Trying to assign an empty next node");
+            {
+                std::lock_guard<std::mutex> lockGuard{mutex_};
+                next_ = next;
+            }
+            if (ready_)
+                self_invoke(storedResult_, std::make_index_sequence<sizeof...(Args)>());
+        }
+
+    private:
+        std::mutex mutex_;
+        std::shared_ptr<next_t> next_;
+
+        // no references allowed here
+        std::tuple<Args...> storedResult_;
+        std::atomic_bool ready_{false};
+
+        template<typename ... ArgsT, size_t ... Indx>
+        void self_invoke(std::tuple<ArgsT...> &tuple, std::index_sequence<Indx...>)
+        {
+            (*this)(std::forward<std::tuple_element_t<Indx, decltype(storedResult_)>>(
+                    std::get<Indx>(tuple))...);
+        }
+    };
+
+
+    template<typename Signature>
+    class chained_continuation;
+
+    template<typename Signature>
+    class chained_continuation_handler;
+
+    template<typename ... Args>
+    class chained_continuation_handler<void(Args...)>
+    {
+    public:
+        using sugnature_t = void(Args...);
+
+        explicit chained_continuation_handler(chained_completion_t)
+                : node_(std::make_shared<chained_continuation_node<sugnature_t>>())
+        {}
+
+        template<typename ... ArgsT>
+        void operator()(ArgsT ... args)
+        {
+            assert(node_ && "Implementation was not initialized!");
+            (*node_)(std::forward<ArgsT>(args)...);
+        }
+
+    private:
+        std::shared_ptr<chained_continuation_node<sugnature_t>>
+                node_;
+
+        friend class chained_continuation<sugnature_t>;
+
+        auto get_node()
+        {
+            return node_;
+        }
+    };
+
+    // stores current node
+    template<typename Signature>
+    class chained_continuation
+    {
+    public:
+        explicit chained_continuation(chained_continuation_handler<Signature> &handler)
+                : node_(handler.get_node())
+        {}
+
+        chained_continuation(const chained_continuation &) = delete;
+
+        chained_continuation &operator=(const chained_continuation &) = delete;
+
+        chained_continuation(chained_continuation &&) noexcept = default;
+
+        chained_continuation &operator=(chained_continuation &&) noexcept = default;
+
+        // TODO: require Callable to have compatible Signature
+//        template<typename Callable, typename CompletionToken>
+//        auto operator()(Callable &&nextCall, CompletionToken &&token)
+//        {
+//            // TODO: return next chained_continuation
+//        }
+
+        bool valid() const
+        {
+            return node_;
+        }
+
+        operator bool() const
+        {
+            return valid();
+        }
+
+        auto get_node()
+        {
+            return node_;
+        }
+
+        /*
+         * TODO:
+         *  chained_continuation<DeducedSignature> operator()(InputSignature &&callable)
+         *  chained_continuation is created as a result of async_initiate.
+         *  callable is stored or invoked instantly if the result is ready
+         *
+         */
+        //
+
+    private:
+
+        // TODO: this is not a node, it is just a callback!
+        std::shared_ptr<chained_continuation_node<Signature>> node_;
+    };
+}
+
+namespace asio
+{
+    template<typename Signature>
+    class async_result<eld::chained_completion_t,
+            Signature>
+    {
+    public:
+        using completion_handler_type = eld::chained_continuation_handler<Signature>;
+        using return_type = eld::chained_continuation<Signature>;
+
+        explicit async_result(completion_handler_type &handler)
+                : continuation_(handler)
+        {}
+
+        return_type get()
+        {
+            return std::move(continuation_);
+        }
+
+        template<typename Initiation,
+                //typename RawCompletionToken,
+                typename... Args>
+        static return_type initiate(
+                Initiation &&initiation,
+//                RawCompletionToken && token,
+                eld::chained_completion_t token,
+                Args &&... args)
+        {
+            // TODO: what?
+            completion_handler_type handler{token};
+            return_type chainedContinuation{handler};
+            std::forward<Initiation>(initiation)(std::move(handler),
+                                                 std::forward<Args>(args)...);
+
+            return chainedContinuation;
+        }
+
+        // TODO: implement this
+//        template<typename Initiation,
+//                typename NextSignature,
+//                typename ... Args>
+//        static eld::chained_continuation<NextSignature> initiate(Initiation &&initiation,
+//                                                                 return_type &&prevContinuation,
+//                                                                 Args &&... args)
+//        {
+//            using next_continuation_t = eld::chained_continuation<NextSignature>;
+//            using next_chained_handler_t = eld::chained_continuation_handler<NextSignature>;
+//
+//            // initiation is initialized with next_chained_handler
+//
+//            // create next_node that will invoke initiation
+//
+//
+//
+////            next_chained_handler_t nextHandler{eld::use_chained_completion};
+////            next_continuation_t nextContinuation{nextHandler};
+////
+////            return_type prev = std::move(prevContinuation);
+////            prev.get_node()->assign_next(nextContinuation.get_node());
+////
+////            completion_handler_type handler{token};
+////            return_type chainedContinuation{handler};
+////            std::forward<Initiation>(initiation)(std::move(handler),
+////                                                 std::forward<Args>(args)...);
+//        }
+
+    private:
+        return_type continuation_;
+    };
+}
+
 namespace eld
 {
 

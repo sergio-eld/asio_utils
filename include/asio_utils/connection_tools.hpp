@@ -18,6 +18,7 @@
 
 namespace eld
 {
+
     namespace traits
     {
         template<typename Connection>
@@ -351,6 +352,141 @@ namespace eld
         return result.get();
     }
 
+    // TODO: private class?
+    template<typename Connection, typename CompletionHandler>
+    class persistent_send_dequeue
+    {
+    public:
+        using supplied_completion_handler =
+        std::function<void(const asio::error_code &, size_t)>;
+
+        using send_command_t = std::pair<asio::const_buffer,
+                supplied_completion_handler>;
+
+        template<typename CompletionHandlerT>
+        persistent_send_dequeue(Connection &connection,
+                                CompletionHandlerT &&completionHandler)
+                : pImpl_(std::make_shared<impl>(connection,
+                                                std::forward<CompletionHandlerT>(completionHandler)))
+        {}
+
+        template<typename CompletionHandlerT, typename Callable>
+        persistent_send_dequeue(Connection &connection,
+                                CompletionHandlerT &&completionHandler,
+                                Callable &&stopOnError)
+                : pImpl_(std::make_shared<impl>(connection,
+                                                std::forward<CompletionHandlerT>(completionHandler),
+                                                std::forward<Callable>(stopOnError)))
+        {}
+
+        persistent_send_dequeue &operator=(const persistent_send_dequeue &) = delete;
+
+
+        template<typename ConstBuffer, typename Callable>
+        void post(ConstBuffer &&buffer, Callable &&onSent)
+        {
+            // post immediately
+            // TODO: lock?
+            if (!pImpl_->messagePending_)
+            {
+                pImpl_->messagePending_ = true;
+                asyncSend(send_command_t(std::forward<ConstBuffer>(buffer),
+                                         std::forward<Callable>(onSent)));
+                return;
+            }
+
+            // schedule while pending
+            std::lock_guard<std::mutex> lockGuard{pImpl_->mutexDequeue_};
+            pImpl_->sendDequeue_.emplace_back(std::forward<ConstBuffer>(buffer),
+                                              std::forward<Callable>(onSent));
+        }
+
+        void operator()(const asio::error_code &errorCode, size_t bytesSent)
+        {}
+
+    private:
+        persistent_send_dequeue(const persistent_send_dequeue &) = default;
+
+        struct impl
+        {
+            template<typename CompletionHandlerT>
+            impl(Connection &connection, CompletionHandlerT &&completionHandler)
+                    : connection_(connection),
+                      completionHandler_(std::forward<CompletionHandlerT>(completionHandler))
+            {}
+
+            template<typename CompletionHandlerT, typename Callable>
+            impl(Connection &connection,
+                 CompletionHandlerT &&completionHandler,
+                 Callable &&stopOnError)
+                    : connection_(connection),
+                      completionHandler_(std::forward<CompletionHandlerT>(completionHandler)),
+                      stopOnError_(std::forward<Callable>(stopOnError))
+            {}
+
+            Connection &connection_;
+            CompletionHandler completionHandler_;
+
+            // user-defined callback to stop sending messages on error
+            std::function<bool(const asio::error_code &, size_t)> stopOnError_;
+
+            std::deque<send_command_t> sendDequeue_;
+            std::mutex mutexDequeue_;
+            std::atomic_bool messagePending_{false};
+
+        };
+
+        // shared state
+        std::shared_ptr<impl> pImpl_;
+
+        // sends a command and proceeds while the dequeue is not empty
+        void asyncSend(send_command_t &&command)
+        {
+            assert(pImpl_->messagePending_ && "messagePending_ is expected to be true!");
+            asio::async_write(pImpl_->connection_, command.first,
+                              [this, onComplete =
+                              std::move(command.second)](const asio::error_code &errorCode, size_t bytesSent)
+                              {
+                                  // first notify the callback provider
+                                  onComplete(errorCode, bytesSent);
+
+                                  // check if user has requested to stop
+                                  if (pImpl_->stopOnError_ &&
+                                      pImpl_->stopOnError_(errorCode, bytesSent))
+                                  {
+                                      pImpl_->completionHandler_(errorCode);
+                                      return;
+                                  }
+
+                                  if (!errorCode)
+                                  {
+                                      std::lock_guard<std::mutex> lockGuard{pImpl_->mutexDequeue_};
+                                      if (pImpl_->sendDequeue_.empty())
+                                      {
+                                          pImpl_->messagePending_ = false;
+                                          return;
+                                      }
+
+                                      asyncSend(std::move(pImpl_->sendDequeue_.front()));
+                                      pImpl_->sendDequeue_.pop_front();
+                                      return;
+                                  }
+
+                                  // TODO: handle all the possible errors
+                                  if (errorCode == asio::error::operation_aborted)
+                                  {
+                                      pImpl_->completionHandler_(errorCode);
+                                      return;
+                                  }
+
+                              });
+
+        }
+    };
+
+    /**
+     * Queue for sending data through composed asio::async_write
+     */
     class send_queue
     {
     public:

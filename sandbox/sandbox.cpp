@@ -5,62 +5,39 @@ using namespace eld;
 
 int main()
 {
-    asio::io_context io_context{};
 
-    auto runContext = [&io_context]()
-    {
-        std::string threadId{};
-        std::stringstream ss;
-        ss << std::this_thread::get_id();
-        ss >> threadId;
-        std::cout << std::string("New thread for asio context: ")
-                     + threadId + "\n";
-        std::cout.flush();
+    using signature_t = void(asio::error_code, bool);
 
-        io_context.run();
+    // handler to be initiated and passed to a composed asynchronous call
+    eld::chained_continuation_handler<signature_t> continuationHandler{
+            eld::use_chained_completion};
 
-        std::cout << std::string("Stopping thread: ")
-                     + threadId + "\n";
-        std::cout.flush();
+    // result to be deduced and returned from a composed asynchronous call
+    chained_continuation<signature_t> chainedContinuation{continuationHandler};
 
-    };
+    auto continuation =
+    asio::async_result < eld::chained_completion_t, signature_t > ::initiate(
+            [](eld::chained_continuation_handler<signature_t> &&handler) {},
+            eld::use_chained_completion);
 
-    asio::ip::tcp::socket client{io_context};
+    asio::io_context context;
+    asio::ip::tcp::socket socket{context};
+    std::vector<uint8_t> vec;
 
-    auto composedAttempt = make_composed_connection_attempt(client,
-                                                            [](const asio::error_code &) {},
-                                                            [](const asio::error_code &) -> bool { return false; });
+    // chainedWrite must be invocable with deduced signature and itself should
+    // deduce next signature
+    auto chainedWrite =
+            asio::async_write(socket, asio::buffer(vec), eld::use_chained_completion);
 
-    std::future<void> future = async_connection_attempt(client,
-                             asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"),
-                                                     12000),
-                             1,
-                             std::chrono::milliseconds(20),
-                             asio::use_future,
-                             [](const asio::error_code &) -> bool
-                             {
-                                 return false;
-                             });
+    // next async_write must accept
 
-    async_connection_attempt(client,
-                             asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"),
-                                                     12000),
-                             1,
-                             std::chrono::milliseconds(20),
-                             [](const asio::error_code&){},
-                             [](const asio::error_code &) -> bool
-                             {
-                                 return false;
-                             });
-
-    auto threads = {
-            std::async(std::launch::async, runContext),
-            std::async(std::launch::async, runContext)
-    };
-
-    auto continuation = [](const asio::error_code&){};
-    eld::persistent_send_dequeue<asio::ip::tcp::socket, decltype(continuation)> persistentSendDequeue{client, continuation};
-
+    //    continuationImpl(asio::error::operation_aborted, false);
+    //    continuationImpl.assign_continuation([](const asio::error_code&
+    //    errorCode, bool b)
+    //                                         {
+    //        std::cout << errorCode.message() << std::endl <<
+    //        std::boolalpha << b << std::endl;
+    //                                         });
 
     // TODO: run server
     // TODO: refuse connections

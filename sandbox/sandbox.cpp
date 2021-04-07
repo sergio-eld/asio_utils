@@ -6,7 +6,14 @@ using namespace eld;
 int main()
 {
 
+    using sig_test_t= void(asio::error_code&, bool);
+
+    auto withSignature = [](asio::error_code, bool){};
+
+    static_assert(eld::detail::has_signature<decltype(withSignature), sig_test_t>(), "");
+
     using signature_t = void(asio::error_code, bool);
+
 
     // handler to be initiated and passed to a composed asynchronous call
     eld::chained_continuation_handler<signature_t> continuationHandler{

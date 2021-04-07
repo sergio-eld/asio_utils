@@ -125,7 +125,6 @@ namespace eld
         }
 
 
-
         void assign_next(std::shared_ptr<next_t> next)
         {
             assert(next && "Trying to assign an empty next node");
@@ -344,15 +343,60 @@ namespace eld
         template<typename Iter>
         using require_iter = typename std::enable_if<check_random_iter<Iter>()>::type;
 
-
         template<typename Endpoint, typename Connection>
         using require_endpoint = typename std::enable_if<std::is_same<Endpoint,
                 traits::endpoint_type<Connection>>::value>::type;
+
+        // https://stackoverflow.com/a/51188325/9363996
+        template<typename F, typename... Args>
+        struct is_invocable :
+                std::is_constructible<
+                        std::function<void(Args ...)>,
+                        std::reference_wrapper<typename std::remove_reference<F>::type>
+                >
+        {
+        };
+
+        // https://stackoverflow.com/a/51188325/9363996
+        template<typename R, typename F, typename... Args>
+        struct is_invocable_r :
+                std::is_constructible<
+                        std::function<R(Args ...)>,
+                        std::reference_wrapper<typename std::remove_reference<F>::type>
+                >
+        {
+        };
+
+        template<typename /*Callable*/, typename /*Signature*/>
+        struct has_signature : std::false_type
+        {
+        };
+
+        // TODO: proper implementation
+        template<typename Callable, typename ... Args>
+        struct has_signature<Callable, void(Args...)> : is_invocable<Callable, Args...>
+        {
+        };
+
+
+        template<typename Callable, typename Signature>
+        using require_signature = typename
+        std::enable_if<has_signature<Callable, Signature>::value>::type;
+
+        template<typename T, typename F>
+        using require_constructible = typename
+        std::enable_if<std::is_constructible<T, F>::value>::type;
+
+        template<typename T, typename R>
+        using require_same = typename std::enable_if<std::is_same<T, R>::value>::type;
+
     }
 
 
     // TODO: move to eld::detail?
-    template<typename Connection, typename CompletionHandler>
+    template<typename Connection, typename CompletionHandler,
+            typename = detail::require_signature<CompletionHandler,
+                    void(const asio::error_code &)>>
     class composed_connection_attempt
     {
     public:
@@ -651,187 +695,221 @@ namespace eld
         return result.get();
     }
 
-    // TODO: private class?
+    // asynchronous persistent operation
     template<typename Connection, typename CompletionHandler>
-    class persistent_send_dequeue
+    class async_send_queue
     {
     public:
-        using supplied_completion_handler =
-        std::function<void(const asio::error_code &, size_t)>;
 
+        using connection_t = Connection;
+        using final_completion_t = CompletionHandler;
+        using completion_signature_t = void(asio::error_code);
+        using stop_on_error_signature_t = bool(const asio::error_code &, size_t);
+        using send_completion_signature_t = void(const asio::error_code &, size_t);
+
+        using send_completion_handler_t = std::function<send_completion_signature_t>;
         using send_command_t = std::pair<asio::const_buffer,
-                supplied_completion_handler>;
+                send_completion_handler_t>;
 
-        template<typename CompletionHandlerT>
-        persistent_send_dequeue(Connection &connection,
-                                CompletionHandlerT &&completionHandler)
+        // TODO: get_executor
+
+        template<typename CompletionHandlerT,
+                typename = detail::require_constructible<final_completion_t, CompletionHandlerT>>
+        async_send_queue(connection_t &connection,
+                         CompletionHandlerT &&completionHandler)
                 : pImpl_(std::make_shared<impl>(connection,
                                                 std::forward<CompletionHandlerT>(completionHandler)))
         {}
 
-        template<typename CompletionHandlerT, typename Callable>
-        persistent_send_dequeue(Connection &connection,
-                                CompletionHandlerT &&completionHandler,
-                                Callable &&stopOnError)
+        template<typename CompletionHandlerT, typename Callable,
+                typename = detail::require_constructible<final_completion_t, CompletionHandlerT>,
+                typename = detail::require_constructible<std::function<stop_on_error_signature_t>, Callable>>
+        async_send_queue(connection_t &connection,
+                         CompletionHandlerT &&completionHandler,
+                         Callable &&stopOnError)
                 : pImpl_(std::make_shared<impl>(connection,
                                                 std::forward<CompletionHandlerT>(completionHandler),
                                                 std::forward<Callable>(stopOnError)))
         {}
 
-        persistent_send_dequeue &operator=(const persistent_send_dequeue &) = delete;
+        async_send_queue(async_send_queue &&) noexcept = default;
 
+        async_send_queue &operator=(async_send_queue &&) noexcept = default;
 
-        template<typename ConstBuffer, typename Callable>
-        void post(ConstBuffer &&buffer, Callable &&onSent)
+        template<typename ConstBuffer, typename CompletionToken>
+        auto asyncSend(ConstBuffer &&buffer, CompletionToken &&token)
         {
-            // post immediately
-            // TODO: lock?
-            if (!pImpl_->messagePending_)
+            assert(pImpl_ && "Invalid async_send_queue: pImpl_ is nullptr!");
+
+            using result_t = asio::async_result<std::decay_t<CompletionToken>,
+                    send_completion_signature_t>;
+            using completion_t = typename result_t::completion_handler_type;
+            completion_t completion{std::forward<CompletionToken>(token)};
+            result_t result{completion};
+
+            auto onSentHandler =
+                    [completion = std::move(completion)](const asio::error_code &errorCode,
+                                                         size_t bytesSent)
+                    {
+                        completion(errorCode, bytesSent);
+                    };
+
+            std::lock_guard<std::mutex> lockGuard{pImpl_->mutex_};
+            if (pImpl_->commands_.empty() &&
+                !pImpl_->running_)
             {
-                pImpl_->messagePending_ = true;
+                pImpl_->running_ = true;
                 asyncSend(send_command_t(std::forward<ConstBuffer>(buffer),
-                                         std::forward<Callable>(onSent)));
-                return;
+                                         std::move(onSentHandler)));
+                return result.get();
             }
 
-            // schedule while pending
-            std::lock_guard<std::mutex> lockGuard{pImpl_->mutexDequeue_};
-            pImpl_->sendDequeue_.emplace_back(std::forward<ConstBuffer>(buffer),
-                                              std::forward<Callable>(onSent));
+            pImpl_->commands_.emplace(std::forward<ConstBuffer>(buffer),
+                                      std::move(onSentHandler));
+            return result.get();
         }
 
-        void operator()(const asio::error_code &errorCode, size_t bytesSent)
-        {}
-
     private:
-        persistent_send_dequeue(const persistent_send_dequeue &) = default;
 
         struct impl
         {
+            connection_t &connection_;
+            final_completion_t finalCompletion_;
+            std::function<stop_on_error_signature_t> stopOnError_;
+
             template<typename CompletionHandlerT>
-            impl(Connection &connection, CompletionHandlerT &&completionHandler)
+            impl(connection_t &connection, CompletionHandlerT &&handler)
                     : connection_(connection),
-                      completionHandler_(std::forward<CompletionHandlerT>(completionHandler))
+                      finalCompletion_(std::forward<CompletionHandlerT>(handler))
             {}
 
             template<typename CompletionHandlerT, typename Callable>
-            impl(Connection &connection,
-                 CompletionHandlerT &&completionHandler,
+            impl(connection_t &connection,
+                 CompletionHandlerT &&handler,
                  Callable &&stopOnError)
                     : connection_(connection),
-                      completionHandler_(std::forward<CompletionHandlerT>(completionHandler)),
+                      finalCompletion_(std::forward<CompletionHandlerT>(handler)),
                       stopOnError_(std::forward<Callable>(stopOnError))
             {}
 
-            Connection &connection_;
-            CompletionHandler completionHandler_;
 
-            // user-defined callback to stop sending messages on error
-            std::function<bool(const asio::error_code &, size_t)> stopOnError_;
+            std::queue<send_command_t> commands_;
+            std::mutex mutex_;
 
-            std::deque<send_command_t> sendDequeue_;
-            std::mutex mutexDequeue_;
-            std::atomic_bool messagePending_{false};
-
+            // TODO: get rid of running?
+            std::atomic_bool running_{false};
         };
 
-        // shared state
         std::shared_ptr<impl> pImpl_;
 
-        // sends a command and proceeds while the dequeue is not empty
+        void lockStop()
+        {
+            std::lock_guard<std::mutex> lockGuard{pImpl_->mutex_};
+            pImpl_->running_ = false;
+        }
+
         void asyncSend(send_command_t &&command)
         {
-            assert(pImpl_->messagePending_ && "messagePending_ is expected to be true!");
             asio::async_write(pImpl_->connection_, command.first,
-                              [this, onComplete =
-                              std::move(command.second)](const asio::error_code &errorCode, size_t bytesSent)
+                              [this, command =
+                              std::move(command.second)](const asio::error_code &errorCode,
+                                                         size_t bytesSent)
                               {
-                                  // first notify the callback provider
-                                  onComplete(errorCode, bytesSent);
+                                  // notify user about the completion of single composed operation
+                                  command(errorCode, bytesSent);
 
-                                  // check if user has requested to stop
-                                  if (pImpl_->stopOnError_ &&
-                                      pImpl_->stopOnError_(errorCode, bytesSent))
+                                  // stop case, ignoring user's opinion whether he wants to proceed
+                                  if (errorCode == asio::error::operation_aborted)
                                   {
-                                      pImpl_->completionHandler_(errorCode);
+                                      if (pImpl_->stopOnError_)
+                                          pImpl_->stopOnError_(errorCode, bytesSent);
+                                      lockStop();
+                                      pImpl_->finalCompletion_(errorCode);
                                       return;
                                   }
 
+                                  // stop requested by user
+                                  if (pImpl_->stopOnError_ && pImpl_->stopOnError_(errorCode, bytesSent))
+                                  {
+                                      lockStop();
+                                      // TODO: special error code?
+                                      pImpl_->finalCompletion_(asio::error::operation_aborted);
+                                      return;
+                                  }
+
+                                  // TODO: other errors? continue if connection was lost?
                                   if (!errorCode)
                                   {
-                                      std::lock_guard<std::mutex> lockGuard{pImpl_->mutexDequeue_};
-                                      if (pImpl_->sendDequeue_.empty())
+                                      std::lock_guard<std::mutex> lockGuard{pImpl_->mutex_};
+                                      if (pImpl_->commands_.empty())
                                       {
-                                          pImpl_->messagePending_ = false;
+                                          pImpl_->running_ = false;
+                                          // TODO: call finalCompletion_?
+                                          pImpl_->finalCompletion_(errorCode);
                                           return;
                                       }
 
-                                      asyncSend(std::move(pImpl_->sendDequeue_.front()));
-                                      pImpl_->sendDequeue_.pop_front();
+                                      asyncSend(std::move(pImpl_->commands_.front()));
+                                      pImpl_->commands_.pop();
                                       return;
                                   }
 
-                                  // TODO: handle all the possible errors
-                                  if (errorCode == asio::error::operation_aborted)
-                                  {
-                                      pImpl_->completionHandler_(errorCode);
-                                      return;
-                                  }
-
+                                  lockStop();
+                                  pImpl_->finalCompletion_(errorCode);
+                                  return;
                               });
-
         }
     };
 
-    /**
-     * Queue for sending data through composed asio::async_write
-     */
-    class send_queue
+    namespace detail
     {
-    public:
-        using command_t = std::pair<asio::const_buffer,
-                std::function<void(const asio::error_code &, size_t)>>;
-
-        template<typename ConstBuffer, typename Callable>
-        void push(ConstBuffer &&buffer, Callable &&onSent)
+        template<typename T, typename R>
+        constexpr T get_combined(T &&t, R &&, /*R is_void*/ std::true_type)
         {
-            std::lock_guard<std::mutex> lockGuard{queueMutex_};
-            if (isPendingPromise_)
-            {
-                pendingCommand_.set_value(command_t(std::forward<ConstBuffer>(buffer),
-                                                    std::forward<Callable>(onSent)));
-                isPendingPromise_ = false;
-                return;
-            }
-
-            sendQueue_.emplace(std::forward<ConstBuffer>(buffer),
-                               std::forward<Callable>(onSent));
+            return std::forward<T>(t);
         }
 
-
-        // only one consumer invokes this (not asynchronously)
-        std::future<command_t> pop()
+        template<typename T, typename R>
+        constexpr auto get_combined(T &&t, R &&r, std::false_type)
         {
-            std::lock_guard<std::mutex> lockGuard{queueMutex_};
-            if (!sendQueue_.empty())
-            {
-                std::promise<command_t> promise{};
-                promise.set_value(std::move(sendQueue_.front()));
-                sendQueue_.pop();
-                return promise.get_future();
-            }
-
-            assert(!isPendingPromise_ && "isPendingPromise_ must be false here");
-            isPendingPromise_ = true;
-            pendingCommand_ = {};
-            return pendingCommand_.get_future();
+            return std::make_tuple(std::forward<T>(t),
+                                   std::forward<R>(r));
         }
 
-    private:
-        std::queue<command_t> sendQueue_;
-        std::mutex queueMutex_;
-        std::promise<command_t> pendingCommand_;
-        std::atomic_bool isPendingPromise_{false};
-    };
+        template<typename T, typename R>
+        constexpr auto get_combined(T &&t, R &&r)
+        {
+            return get_combined(std::forward<T>(t), std::forward<R>(r),
+                                std::is_void<decltype(std::declval<R>().get())>());
+        }
+    }
+
+    // TODO: specializations for non-callback tokens
+    template<typename Connection, typename CompletionToken>
+    auto make_async_send_queue(Connection &connection, CompletionToken &&finalToken)
+    {
+        using result_t = asio::async_result<std::decay_t<CompletionToken>,
+                void(asio::error_code)>;
+        using completion_t = typename result_t::completion_handler_type;
+
+        completion_t completion{std::forward<CompletionToken>(finalToken)};
+        result_t result{completion};
+
+        return detail::get_combined(async_send_queue<Connection, completion_t>(connection,
+                                                                               std::move(completion)),
+                                    std::move(result));
+    }
+
+    template<typename T>
+    T &unwrap(T &wrappedQueue)
+    {
+        return wrappedQueue;
+    }
+
+    template<typename T, typename Res>
+    T &unwrap(std::tuple<T, Res> &wrappedQueue)
+    {
+        return std::get<0>(wrappedQueue);
+    }
 
 }

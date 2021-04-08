@@ -1,50 +1,20 @@
 ﻿
 #include "asio_utils/connection_tools.hpp"
+#include "../test/test_utils.h"
+#include <numeric>
 
 using namespace eld;
 
 int main()
 {
+    std::vector<uint32_t> input{2, 3,
+                                0, 1,
+                                0, 1,
+                                3,
+                                50, 51, 52, 53,
+                                4};
 
-    using sig_test_t= void(asio::error_code&, bool);
-
-    auto withSignature = [](asio::error_code, bool){};
-
-    static_assert(eld::detail::has_signature<decltype(withSignature), sig_test_t>(), "");
-
-    using signature_t = void(asio::error_code, bool);
-
-
-    // handler to be initiated and passed to a composed asynchronous call
-    eld::chained_continuation_handler<signature_t> continuationHandler{
-            eld::use_chained_completion};
-
-    // result to be deduced and returned from a composed asynchronous call
-    chained_continuation<signature_t> chainedContinuation{continuationHandler};
-
-    auto continuation =
-    asio::async_result < eld::chained_completion_t, signature_t > ::initiate(
-            [](eld::chained_continuation_handler<signature_t> &&handler) {},
-            eld::use_chained_completion);
-
-    asio::io_context context;
-    asio::ip::tcp::socket socket{context};
-    std::vector<uint8_t> vec;
-
-    // chainedWrite must be invocable with deduced signature and itself should
-    // deduce next signature
-    auto chainedWrite =
-            asio::async_write(socket, asio::buffer(vec), eld::use_chained_completion);
-
-    // next async_write must accept
-
-    //    continuationImpl(asio::error::operation_aborted, false);
-    //    continuationImpl.assign_continuation([](const asio::error_code&
-    //    errorCode, bool b)
-    //                                         {
-    //        std::cout << errorCode.message() << std::endl <<
-    //        std::boolalpha << b << std::endl;
-    //                                         });
+    auto lengths = testing::get_chunk_lengths(input.cbegin(), input.cend());
 
     // TODO: run server
     // TODO: refuse connections

@@ -702,7 +702,6 @@ namespace eld
     class async_send_queue
     {
     public:
-
         using connection_t = Connection;
         using final_completion_t = CompletionHandler;
         using completion_signature_t = void(asio::error_code);

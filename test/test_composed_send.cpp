@@ -87,7 +87,7 @@ private:
     std::vector<uint8_t> dataReceived_;
 };
 
-TEST(compose_send, success_sample)
+TEST(compose_send_tcp, success_sample)
 {
     using asio::ip::tcp;
 
@@ -118,7 +118,7 @@ TEST(compose_send, success_sample)
     ASSERT_EQ(dataSent, dataReceived);
 }
 
-TEST(compose_send, single_send_success)
+TEST(compose_send_tcp, single_send_success)
 {
     using asio::ip::tcp;
 
@@ -165,6 +165,119 @@ TEST(compose_send, single_send_success)
     ASSERT_EQ(dataSent, dataReceived);
     ASSERT_EQ(bytesSent, arraySize);
     ASSERT_FALSE(sentError);
+}
+
+TEST(compose_send_tcp, big_array_send_one_go)
+{
+    using asio::ip::tcp;
+
+    asio::thread_pool context{2};
+
+    receiver receiver{asio::make_strand(context)};
+
+    receiver.start();
+
+    constexpr size_t arraySize = 1000000;
+
+    std::vector<uint8_t> dataSent(arraySize),
+            dataReceived{};
+    std::iota(dataSent.begin(), dataSent.end(), 0);
+
+    tcp::socket client{context};
+    client.async_connect({asio::ip::make_address_v4(localhost), port}, asio::use_future).wait();
+
+    auto asyncSendQueueTuple =
+            eld::make_async_send_queue(client, asio::use_future);
+    size_t bytesSent = 0;
+    asio::error_code sentError{};
+
+    // send data
+    eld::unwrap(asyncSendQueueTuple).
+            asyncSend(asio::buffer(dataSent), [&](const asio::error_code errorCode, size_t sent)
+    {
+        bytesSent = sent;
+        sentError = errorCode;
+        return false;
+    });
+
+    // wait data to be sent
+    std::get<1>(asyncSendQueueTuple).get();
+
+    // wait data to be received
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    receiver.stop();
+
+    context.wait();
+
+    receiver.getData(dataReceived);
+
+    std::cout << "Sent: " << dataSent.size() <<
+              " received: " << dataReceived.size() << std::endl;
+    ASSERT_EQ(dataSent, dataReceived);
+    ASSERT_EQ(bytesSent, arraySize);
+    ASSERT_FALSE(sentError);
+}
+
+TEST(compose_send_tcp, big_array_send_multiple_attempts_threadsafe)
+{
+    using asio::ip::tcp;
+
+    asio::thread_pool context{2};
+
+    receiver receiver{asio::make_strand(context)};
+
+    receiver.start();
+
+    constexpr size_t arraySize = 1000000;
+
+    std::vector<uint8_t> dataSent(arraySize),
+            dataReceived{};
+    std::iota(dataSent.begin(), dataSent.end(), 0);
+
+    tcp::socket client{context};
+    client.async_connect({asio::ip::make_address_v4(localhost), port}, asio::use_future).wait();
+
+    auto asyncSendQueueTuple =
+            eld::make_async_send_queue(client, asio::use_future);
+    size_t bytesSent = 0;
+    asio::error_code sentError{};
+
+    constexpr size_t chunks = 1000,
+            chunkSize = arraySize / chunks;
+    auto iter = dataSent.cbegin();
+    for (size_t i = 0; i != arraySize;)
+    {
+        const size_t toSend = i + chunkSize <= arraySize ?
+                              chunkSize :
+                              arraySize - i;
+
+        eld::unwrap(asyncSendQueueTuple).
+                asyncSend(asio::buffer(std::next(dataSent.data(), i), toSend),
+                          [&](const asio::error_code errorCode, size_t sent)
+                          {
+                              bytesSent += sent;
+                              EXPECT_FALSE(errorCode);
+                              EXPECT_EQ(toSend, sent);
+                              return false;
+                          });
+        i += toSend;
+    }
+
+    // wait data to be sent
+    std::get<1>(asyncSendQueueTuple).get();
+
+    // wait data to be received
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    receiver.stop();
+
+    context.wait();
+
+    receiver.getData(dataReceived);
+
+    std::cout << "Sent: " << dataSent.size() <<
+              " received: " << dataReceived.size() << std::endl;
+    ASSERT_EQ(dataSent, dataReceived);
+    ASSERT_EQ(bytesSent, arraySize);
 }
 
 int main(int argc, char **argv)

@@ -619,6 +619,8 @@ namespace eld
         void asyncConnect()
         {
             startTimer();
+
+            // TODO: get rid of move
             pImpl_->connection_.async_connect(pImpl_->endpoint_, std::move(*this));
         }
     };

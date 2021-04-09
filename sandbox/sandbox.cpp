@@ -16,6 +16,19 @@ int main()
 
     auto lengths = testing::get_chunk_lengths(input.cbegin(), input.cend());
 
+    asio::io_context context;
+    auto res = testing::async_receive_tcp(asio::make_strand(context), 100, asio::use_future);
+
+    context.run();
+
+    try
+    {
+        auto emptyVec = res.get();
+    }
+    catch (const std::system_error& errorCode)
+    {
+        std::cerr << errorCode.what() << std::endl;
+    }
     // TODO: run server
     // TODO: refuse connections
     // TODO: accept connections

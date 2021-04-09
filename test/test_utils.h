@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <numeric>
+#include <chrono>
 
 namespace eld
 {
@@ -11,6 +12,243 @@ namespace eld
     {
         constexpr const char localhost[] = "127.0.0.1";
         constexpr uint16_t port = 12000;
+
+        namespace detail
+        {
+            template<typename Signature, typename Callable>
+            using require_signature_t = typename std::enable_if<
+                    std::is_constructible<std::function<Signature>, Callable>::value
+            >::type;
+
+            // moved out of the class to ease debugging
+            template<typename T, T>
+            struct status_tag
+            {
+            };
+
+            // moved out of the class to ease debugging
+            template<typename T, T>
+            struct timeout_tag
+            {
+            };
+
+            template<typename CompletionHandler>
+            struct composed_receive_data_tcp :
+                    std::enable_shared_from_this<composed_receive_data_tcp<CompletionHandler>>
+            {
+            public:
+                using completion_signature_t = void(asio::error_code, std::vector<uint8_t>);
+                using completion_t = CompletionHandler;
+
+                enum class status
+                {
+                    accepting_peer,
+                    receiving_data
+                };
+
+                using accepting_peer_t = status_tag<status, status::accepting_peer>;
+                using receiving_data_t = status_tag<status, status::receiving_data>;
+                using timeout_accepting_t = timeout_tag<status, status::accepting_peer>;
+                using timeout_receiving_t = timeout_tag<status, status::receiving_data>;
+
+                constexpr static accepting_peer_t accepting_peer{};
+                constexpr static receiving_data_t receiving_data{};
+                constexpr static timeout_accepting_t timeout_accepting{};
+                constexpr static timeout_receiving_t timeout_receiving{};
+
+                // TODO: make private/protected to prevent stack-allocation
+                template<typename Executor,
+                        typename CompletionHandlerT,
+                        typename = require_signature_t<completion_signature_t, CompletionHandlerT>>
+                composed_receive_data_tcp(Executor &&executor,
+                                          CompletionHandlerT &&completion)
+                        : acceptor_(std::forward<Executor>(executor),
+                                    {asio::ip::make_address_v4(localhost), port}),
+                          completion_(std::forward<CompletionHandlerT>(completion))
+                {}
+
+                void operator()(size_t expectedBytes, std::chrono::milliseconds timeout)
+                {
+                    expectedBytes_ = expectedBytes;
+                    timeout_ = timeout;
+
+                    if (!expectedBytes)
+                    {
+                        completion_(asio::error_code(),
+                                    std::vector<uint8_t>());
+                        return;
+                    }
+
+                    // can't be called form constructor because of shared_from_this()
+                    startAccepting();
+                }
+
+                // operator for steady_timer::async_wait handling
+                template<status S>
+                void operator()(timeout_tag<status, S> timeoutTag, const asio::error_code &errorCode)
+                {
+                    // timer was cancelled
+                    if (errorCode == asio::error::operation_aborted)
+                        return;
+
+                    // timeout case
+                    assert(!errorCode && "Unexpected timer error");
+                    cancel(timeoutTag);
+                }
+
+                // operator for acceptor::async_accept result handling
+                void operator()(accepting_peer_t, const asio::error_code &errorCode)
+                {
+                    // timeout or other error case
+                    if (errorCode)
+                    {
+                        completion_(errorCode == asio::error::operation_aborted ?
+                                    asio::error::timed_out : errorCode,
+                                    std::vector<uint8_t>()); // will not compile with {}
+                        return;
+                    }
+
+                    // success
+                    stopTimer();
+                }
+
+                // operator for socket::async_read_some handling
+                void operator()(receiving_data_t,
+                                const asio::error_code &errorCode,
+                                size_t bytesRead)
+                {
+                    // timeout or error
+                    if (errorCode)
+                    {
+                        completion_(errorCode == asio::error::operation_aborted ?
+                                    asio::error::timed_out : errorCode,
+                                    std::move(dataReceived_));
+                        return;
+                    }
+
+                    // successful read
+                    stopTimer();
+                    const auto iterInputBegin = inputBuffer_.cbegin(),
+                            iterInputEnd = std::next(iterInputBegin, bytesRead);
+
+                    std::copy(iterInputBegin, iterInputEnd, std::back_inserter(dataReceived_));
+                    if (dataReceived_.size() != expectedBytes_)
+                        startReceiving();
+
+                    // finish
+                    completion_({}, std::move(dataReceived_));
+                }
+
+                ~composed_receive_data_tcp()
+                {
+                    try
+                    {
+                        acceptor_.close();
+                        peer_.close();
+                    }
+                    catch (const asio::error_code &errorCode)
+                    {
+                        std::cerr << "Destructor exception: " <<
+                                  errorCode.message() << std::endl;
+                    }
+                }
+
+            private:
+                asio::ip::tcp::acceptor acceptor_;
+                completion_t completion_;
+                size_t expectedBytes_;
+                std::chrono::milliseconds timeout_;
+
+                asio::ip::tcp::socket peer_{acceptor_.get_executor()};
+
+                std::vector<uint8_t> inputBuffer_ = std::vector<uint8_t>(2048);
+                std::vector<uint8_t> dataReceived_;
+                asio::steady_timer timeoutTimer_{acceptor_.get_executor()};
+
+                void cancel(timeout_accepting_t)
+                {
+                    acceptor_.cancel();
+                }
+
+                void cancel(timeout_receiving_t)
+                {
+                    peer_.cancel();
+                }
+
+                template<status S>
+                void startTimer(timeout_tag<status, S>)
+                {
+                    // automatically cancels the timer's asynchronous wait
+                    timeoutTimer_.expires_after(timeout_);
+
+                    timeoutTimer_.async_wait([this, keepAlive =
+                    this->shared_from_this()](const asio::error_code &errorCode)
+                                             {
+                                                 (*this)(timeout_tag<status, S>(), errorCode);
+                                             });
+                }
+
+                void stopTimer()
+                {
+                    timeoutTimer_.cancel();
+                }
+
+                // use bind instead?
+                void startAccepting()
+                {
+                    using asio::ip::tcp;
+
+                    acceptor_.set_option(tcp::acceptor::reuse_address(true));
+                    startTimer(timeout_accepting);
+
+                    acceptor_.async_accept(peer_, [this, keepAlive =
+                    this->shared_from_this()](const asio::error_code &errorCode)
+                    {
+                        (*this)(accepting_peer, errorCode);
+                    });
+                }
+
+                // use bind instead?
+                void startReceiving()
+                {
+                    startTimer(timeout_receiving);
+                    peer_.async_read_some(asio::buffer(inputBuffer_),
+                                          [this, sharedPtr =
+                                          this->shared_from_this()](const asio::error_code &errorCode,
+                                                                    size_t bytesReceived)
+                                          {
+                                              (*this)(receiving_data, errorCode, bytesReceived);
+                                          });
+                }
+            };
+        }
+
+        template<typename CompletionToken,
+                typename Executor>
+        auto async_receive_tcp(Executor &&executor,
+                               size_t expectedBytes,
+                               CompletionToken &&token)
+        {
+            using asio::ip::tcp;
+            using namespace detail;
+            using namespace std::chrono_literals;
+
+            using result_t = asio::async_result<std::decay_t<CompletionToken>,
+                    void(asio::error_code, std::vector<uint8_t>)>;
+            using completion_t = typename result_t::completion_handler_type;
+            using composed_procedure_t = composed_receive_data_tcp<completion_t>;
+
+            completion_t completion{std::forward<CompletionToken>(token)};
+            result_t result{completion};
+
+            constexpr std::chrono::milliseconds timeout = 200ms;
+
+            auto procedure = std::make_shared<composed_procedure_t>(std::forward<Executor>(executor),
+                                                                    std::move(completion));
+            (*procedure)(expectedBytes, timeout);
+
+            return result.get();
+        }
 
         class receiver
         {
@@ -25,9 +263,6 @@ namespace eld
                 acceptor_.set_option(tcp::acceptor::reuse_address(true));
             }
 
-//    template <typename Executor>
-//    explicit receiver(Executor &executor)
-
             template<typename Executor>
             explicit receiver(Executor executor)
                     : acceptor_(executor, {asio::ip::make_address_v4(localhost), port}),
@@ -37,6 +272,7 @@ namespace eld
                 acceptor_.set_option(tcp::acceptor::reuse_address(true));
             }
 
+            template<typename CompletionToken>
             void start()
             {
                 acceptor_.listen();
@@ -60,15 +296,23 @@ namespace eld
                 return dataReceived_.size();
             }
 
-            template <typename T>
+            template<typename T>
             void getData(std::vector<T> &data)
             {
-                const auto *received = reinterpret_cast<const T*>(dataReceived_.data());
+                const auto *received = reinterpret_cast<const T *>(dataReceived_.data());
                 std::copy(received, std::next(received, dataReceived_.size() / sizeof(T)),
                           std::back_inserter(data));
             }
 
         private:
+            asio::ip::tcp::acceptor acceptor_;
+            asio::ip::tcp::socket peer_;
+            std::atomic_size_t expectedInput_;
+
+            asio::steady_timer timeoutTimer_;
+
+            std::vector<uint8_t> readBuffer_ = std::vector<uint8_t>(2048);
+            std::vector<uint8_t> dataReceived_;
 
             void startReadLoop()
             {
@@ -91,12 +335,6 @@ namespace eld
 
                                     });
             }
-
-            asio::ip::tcp::acceptor acceptor_;
-            asio::ip::tcp::socket peer_;
-
-            std::vector<uint8_t> readBuffer_ = std::vector<uint8_t>(2048);
-            std::vector<uint8_t> dataReceived_;
         };
 
         template<typename RandomIter>
@@ -132,7 +370,7 @@ namespace eld
             return lengths;
         }
 
-        template <typename Integral>
+        template<typename Integral>
         std::vector<Integral> make_increasing_range(Integral start, size_t length)
         {
             auto vec = std::vector<Integral>(length);

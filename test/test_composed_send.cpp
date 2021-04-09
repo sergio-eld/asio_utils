@@ -5,6 +5,7 @@
 #include <vector>
 #include <iostream>
 #include <numeric>
+#include <chrono>
 
 #include "asio_utils/connection_tools.hpp"
 #include "test_utils.h"
@@ -14,22 +15,47 @@
  * 1) Sending data successfully:
  *    async_send_queue serializes asynchronous composed requests to send data.
  *    According to specification asio::async_write sends data in chunks in zero or more calls.
- *    async_send_queue guarantees that a range of data asynchronously sent by
- *    asio::async_write is sent as a contiguous range regardless of next invocations to send another data.
+ *    async_send_queue guarantees that at any time only one call to asio::async_write will be processed
+ *    regardless of the thread of invocation or number of simultaneous calls made.
  *
- *    The test sends an array of integers that represent an increasing contiguous integral range
- *    (each next element increased by 1). Data can be sent in one or more calls from one or more threads.
+ *    The test sends a contiguous array of increasing integers (next element is increased by 1).
+ *    Data can be sent in one or more calls from one or more threads.
  *
- *      Arguments:
+ *      Input arguments:
  *          - number of elements to send
  *          - number of threads
  *          - number of elements per thread
  *          - number of sub-ranges per thread
  *          - interval between sending sub-ranges of data
  *      Expected outcome:
- *          - number of sub-ranges received corresponds to number of sent
+ *          - number of sub-ranges received corresponds to number of those sent
  *          - sub-range sent by one command must be received as the same contiguous sub-range
+ * 2) Errors on sending
+ *
+ * 3) Data race test
  */
+
+using elements_num_t = size_t;
+using threads_num_t = size_t;
+using elements_per_thread_t = size_t;
+using subranges_per_thread_t = size_t;
+
+namespace e_testing = eld::testing;
+
+template <typename Interval>
+void send_data_success(elements_num_t elements,
+                       threads_num_t threads,
+                       elements_per_thread_t elemsPerThread,
+                       subranges_per_thread_t subRangesNum,
+                       Interval intervalBetweenSends)
+{
+    // sending and receiving in different threads
+    asio::thread_pool threadPool{2};
+
+    e_testing::receiver receiver{asio::make_strand(threadPool)};
+
+
+}
 
 TEST(compose_send_tcp, success_sample)
 {
@@ -248,9 +274,9 @@ TEST(compose_send_tcp, big_array_send_one_chunk_per_thread)
     auto asyncSendQueueTuple =
             eld::make_async_send_queue(client, [&queueEmptied_](asio::error_code)
             {
-                std::cout << "Thread id: " << std::this_thread::get_id() << std::endl;
-                std::cout << "Send queue has been emptied: " << ++queueEmptied_ << std::endl;
-                std::cout << "Thread id: " << std::this_thread::get_id() << std::endl;
+//                std::cout << "Thread id: " << std::this_thread::get_id() << std::endl;
+//                std::cout << "Send queue has been emptied: " << ++queueEmptied_ << std::endl;
+//                std::cout << "Thread id: " << std::this_thread::get_id() << std::endl;
 
             });
     std::atomic<size_t> bytesSent{0};

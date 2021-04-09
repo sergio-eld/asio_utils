@@ -811,6 +811,7 @@ namespace eld
 
         void asyncSend(send_command_t &&command)
         {
+            std::cerr << std::this_thread::get_id() << std::endl;
             asio::async_write(pImpl_->connection_, command.first,
                               [this, command =
                               std::move(command.second)](const asio::error_code &errorCode,

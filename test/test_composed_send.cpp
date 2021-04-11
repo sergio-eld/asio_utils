@@ -104,11 +104,11 @@ void send_data_success(const elements_num_t elements,
                             const std::pair<const_iter, const_iter> &subRange =
                                     subRangesInput[sr];
 
-                            const uint32_t *begin = &(*subRange.first);
                             const auto length = (size_t) std::distance(subRange.first,
                                                                        subRange.second),
                                     sizeInBytes = length * (sizeof(uint32_t) / sizeof(uint8_t));
-                            sendQueue.asyncSend(asio::buffer(begin, sizeInBytes),
+
+                            sendQueue.asyncSend(eld::buffer(subRange.first, subRange.second),
                                                 [sizeInBytes](const asio::error_code &errorCode, size_t bytesSent)
                                                 {
                                                     EXPECT_FALSE(errorCode);

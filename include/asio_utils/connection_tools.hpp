@@ -390,8 +390,29 @@ namespace eld
         template<typename T, typename R>
         using require_same = typename std::enable_if<std::is_same<T, R>::value>::type;
 
+        template<typename RandomIter>
+        using require_random_iter_t = typename std::enable_if<
+                std::is_same<typename std::iterator_traits<RandomIter>::iterator_category,
+                        std::random_access_iterator_tag>::value &&
+                std::is_pod<typename std::iterator_traits<RandomIter>::value_type
+                >::value>::type;
+
     }
 
+    /**
+     * Helper function to create asio buffer from 2 iterators
+     */
+    template<typename RandomIter,
+            typename = detail::require_random_iter_t<RandomIter>>
+    auto buffer(RandomIter begin, RandomIter end)
+    {
+        using elem_t = typename std::iterator_traits<RandomIter>::value_type;
+        assert(std::distance(begin, end) >= 0 && "buffer: Invalid range!");
+        const auto *data = reinterpret_cast<const uint8_t*>(&*begin);
+        const size_t sizeInBytes = (size_t)std::distance(begin, end) *
+                (sizeof(elem_t) / sizeof(uint8_t));
+        return asio::buffer(data, sizeInBytes);
+    }
 
     // TODO: move to eld::detail?
     template<typename Connection, typename CompletionHandler,
@@ -864,7 +885,7 @@ namespace eld
         // TODO: refactor?
         void asyncSend(send_command_t &&command)
         {
-            asio::const_buffer& buffer = command.first;
+            asio::const_buffer &buffer = command.first;
 
             // TODO: use operator() of this to handle result
             asio::async_write(pSharedState_->connection_, buffer,

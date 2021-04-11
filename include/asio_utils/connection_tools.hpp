@@ -753,9 +753,11 @@ namespace eld
             using result_t = asio::async_result<std::decay_t<CompletionToken>,
                     send_completion_signature_t>;
             using completion_t = typename result_t::completion_handler_type;
+
             completion_t completion{std::forward<CompletionToken>(token)};
             result_t result{completion};
 
+            // TODO: check if executor is provided and bind?
             auto onSentHandler =
                     [completion = std::move(completion)](const asio::error_code &errorCode,
                                                          size_t bytesSent)
@@ -817,9 +819,13 @@ namespace eld
             pImpl_->running_ = false;
         }
 
+        // TODO: refactor?
         void asyncSend(send_command_t &&command)
         {
-            asio::async_write(pImpl_->connection_, command.first,
+            asio::const_buffer& buffer = command.first;
+
+            // TODO: use operator() of this to handle result
+            asio::async_write(pImpl_->connection_, buffer,
                               [this, command =
                               std::move(command.second)](const asio::error_code &errorCode,
                                                          size_t bytesSent)
@@ -853,16 +859,26 @@ namespace eld
                                       if (pImpl_->commands_.empty())
                                       {
                                           pImpl_->running_ = false;
-                                          // TODO: call finalCompletion_?
-                                          pImpl_->finalCompletion_(errorCode);
                                           return;
                                       }
 
-                                      asyncSend(std::move(pImpl_->commands_.front()));
+                                      send_command_t dispatchedCommand = std::move(pImpl_->commands_.front());
                                       pImpl_->commands_.pop();
+
+                                      // TODO: use dispatch?
+                                      asio::dispatch(get_executor(), [this,
+                                              dispatchedCommand = std::move(dispatchedCommand)]() mutable
+                                      {
+                                          asyncSend(std::move(dispatchedCommand));
+                                      });
+
+                                      // old code without using dispatch
+                                      // asyncSend(std::move(pImpl_->commands_.front()));
+                                      // pImpl_->commands_.pop();
                                       return;
                                   }
 
+                                  // unrecoverable error case
                                   lockStop();
                                   pImpl_->finalCompletion_(errorCode);
                                   return;

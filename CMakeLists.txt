@@ -13,14 +13,14 @@ list(APPEND CMAKE_MODULE_PATH
 
 find_package(ASIO REQUIRED)
 
-add_library(connection_tools INTERFACE)
-target_include_directories(connection_tools INTERFACE
+add_library(asio_utils INTERFACE)
+target_include_directories(asio_utils INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
         )
-target_link_libraries(connection_tools INTERFACE ASIO::ASIO)
+target_link_libraries(asio_utils INTERFACE ASIO::ASIO)
 
-add_library(eld::connection_tools ALIAS connection_tools)
+add_library(eld::asio_utils ALIAS asio_utils)
 
 # tests
 find_package(GTest CONFIG REQUIRED)
@@ -29,13 +29,10 @@ add_subdirectory(test)
 
 # sandbox
 add_executable(sandbox sandbox/sandbox.cpp)
-target_link_libraries(sandbox PRIVATE eld::connection_tools)
+target_link_libraries(sandbox PRIVATE eld::asio_utils)
 
 add_executable(sb.find_deadlock sandbox/find_deadlock.cpp)
-target_link_libraries(sb.find_deadlock PRIVATE eld::connection_tools)
-
-add_executable(sb.sf_example sandbox/sf_example.cpp)
-target_link_libraries(sb.sf_example PRIVATE eld::connection_tools)
+target_link_libraries(sb.find_deadlock PRIVATE eld::asio_utils)
 
 add_executable(example_6 sandbox/example_6.cpp)
-target_link_libraries(example_6 PRIVATE eld::connection_tools)
+target_link_libraries(example_6 PRIVATE eld::asio_utils)

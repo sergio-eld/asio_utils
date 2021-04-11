@@ -1,5 +1,5 @@
 ﻿
-link_libraries(eld::connection_tools GTest::gtest)
+link_libraries(eld::asio_utils GTest::gtest)
 
 add_executable(test.make_connection_attempt test_make_connection_attempt.cpp)
 add_test(NAME test.make_connection_attempt

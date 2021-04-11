@@ -697,7 +697,16 @@ namespace eld
         return result.get();
     }
 
-    // asynchronous persistent operation
+
+    /**
+     * Class for a persistent asynchronous queue to send data via series of composed asio::async_write operations.<br>
+     * The object uses connections executor. Only one queue is allowed per connection.
+     * @tparam Connection type for a connection to be used to asynchronously send data.
+     * @tparam CompletionHandler handler to be invoked upon events:<br>
+     * - operation aborted (as a result of external invocation of connection.cancel() method)
+     * - unrecoverable error has occurred (todo: to be specified)
+     * - user has requested to stop via user provided callback stopOnError
+     */
     template<typename Connection, typename CompletionHandler>
     class async_send_queue
     {
@@ -712,43 +721,76 @@ namespace eld
         using send_command_t = std::pair<asio::const_buffer,
                 send_completion_handler_t>;
 
-        // TODO: get_executor
         using executor_type = typename connection_t::executor_type;
 
         executor_type get_executor()
         {
-            return pImpl_->connection_.get_executor();
+            return pSharedState_->connection_.get_executor();
         }
 
-
+        /**
+         * Constructor. Initializes shared state.
+         * @tparam CompletionHandlerT type for a final completion handler
+         * @param connection connection to be used to send data
+         * @param completionHandler final completion handler. Will be invoked either upon unrecoverable error
+         * or upon user's request to stop.
+         */
         template<typename CompletionHandlerT,
                 typename = detail::require_constructible<final_completion_t, CompletionHandlerT>>
         async_send_queue(connection_t &connection,
                          CompletionHandlerT &&completionHandler)
-                : pImpl_(std::make_shared<impl>(connection,
-                                                std::forward<CompletionHandlerT>(completionHandler)))
+                : pSharedState_(std::make_shared<impl>(connection,
+                                                       std::forward<CompletionHandlerT>(completionHandler)))
         {}
 
+        /**
+         * Constructor. Initializes shared state.
+         * @tparam CompletionHandlerT type for a final completion handler
+         * @tparam Callable type for a user-supplied callable object stopOnError
+         * @param connection connection connection to be used to send data
+         * @param completionHandler final completion handler. Will be invoked either upon unrecoverable error
+         * or upon user's request to stop.
+         * @param stopOnError user-provided callable to request stop on error.
+         */
         template<typename CompletionHandlerT, typename Callable,
                 typename = detail::require_constructible<final_completion_t, CompletionHandlerT>,
                 typename = detail::require_constructible<std::function<stop_on_error_signature_t>, Callable>>
         async_send_queue(connection_t &connection,
                          CompletionHandlerT &&completionHandler,
                          Callable &&stopOnError)
-                : pImpl_(std::make_shared<impl>(connection,
-                                                std::forward<CompletionHandlerT>(completionHandler),
-                                                std::forward<Callable>(stopOnError)))
+                : pSharedState_(std::make_shared<impl>(connection,
+                                                       std::forward<CompletionHandlerT>(completionHandler),
+                                                       std::forward<Callable>(stopOnError)))
         {}
 
+        /**
+         * Move constructor is not allowed.
+         */
         async_send_queue(async_send_queue &&) noexcept = default;
 
+        /**
+         * Move assignment is not allowed.
+         * @return
+         */
         async_send_queue &operator=(async_send_queue &&) noexcept = default;
 
-        // public method to send, maybe provide a final completion handler here?
+        /**
+         * Method to send ot enqueue user-supplied data and completion handler.<br>
+         * If no data is pending for sending, will send immediately and start the loop
+         * until all the data has been sent. Otherwise will enqueue.
+         * @tparam ConstBuffer type for a const buffer which contains data to be sent.
+         * @tparam CompletionToken type for a completion token. Can be a simple callback or custom tokens like
+         * asio::use_future.
+         * @param buffer buffer that holds the data to be sent.
+         * Caller is responsible to maintain the buffer's validity until the send command has been completed.
+         * @param token completion token. Will be used to initialize completion handler.
+         * Will be invoked when the asio::async_write call is finished.
+         * @return Deduced from CompletionToken type result.
+         */
         template<typename ConstBuffer, typename CompletionToken>
         auto asyncSend(ConstBuffer &&buffer, CompletionToken &&token)
         {
-            assert(pImpl_ && "Invalid async_send_queue: pImpl_ is nullptr!");
+            assert(pSharedState_ && "Invalid async_send_queue: pSharedState_ is nullptr!");
 
             using result_t = asio::async_result<std::decay_t<CompletionToken>,
                     send_completion_signature_t>;
@@ -765,18 +807,18 @@ namespace eld
                         completion(errorCode, bytesSent);
                     };
 
-            std::lock_guard<std::mutex> lockGuard{pImpl_->mutex_};
-            if (pImpl_->commands_.empty() &&
-                !pImpl_->running_)
+            std::lock_guard<std::mutex> lockGuard{pSharedState_->mutex_};
+            if (pSharedState_->commands_.empty() &&
+                !pSharedState_->running_)
             {
-                pImpl_->running_ = true;
+                pSharedState_->running_ = true;
                 asyncSend(send_command_t(std::forward<ConstBuffer>(buffer),
                                          std::move(onSentHandler)));
                 return result.get();
             }
 
-            pImpl_->commands_.emplace(std::forward<ConstBuffer>(buffer),
-                                      std::move(onSentHandler));
+            pSharedState_->commands_.emplace(std::forward<ConstBuffer>(buffer),
+                                             std::move(onSentHandler));
             return result.get();
         }
 
@@ -811,12 +853,12 @@ namespace eld
             std::atomic_bool running_{false};
         };
 
-        std::shared_ptr<impl> pImpl_;
+        std::shared_ptr<impl> pSharedState_;
 
         void lockStop()
         {
-            std::lock_guard<std::mutex> lockGuard{pImpl_->mutex_};
-            pImpl_->running_ = false;
+            std::lock_guard<std::mutex> lockGuard{pSharedState_->mutex_};
+            pSharedState_->running_ = false;
         }
 
         // TODO: refactor?
@@ -825,7 +867,7 @@ namespace eld
             asio::const_buffer& buffer = command.first;
 
             // TODO: use operator() of this to handle result
-            asio::async_write(pImpl_->connection_, buffer,
+            asio::async_write(pSharedState_->connection_, buffer,
                               [this, command =
                               std::move(command.second)](const asio::error_code &errorCode,
                                                          size_t bytesSent)
@@ -836,34 +878,34 @@ namespace eld
                                   // stop case, ignoring user's opinion whether he wants to proceed
                                   if (errorCode == asio::error::operation_aborted)
                                   {
-                                      if (pImpl_->stopOnError_)
-                                          pImpl_->stopOnError_(errorCode, bytesSent);
+                                      if (pSharedState_->stopOnError_)
+                                          pSharedState_->stopOnError_(errorCode, bytesSent);
                                       lockStop();
-                                      pImpl_->finalCompletion_(errorCode);
+                                      pSharedState_->finalCompletion_(errorCode);
                                       return;
                                   }
 
                                   // stop requested by user
-                                  if (pImpl_->stopOnError_ && pImpl_->stopOnError_(errorCode, bytesSent))
+                                  if (pSharedState_->stopOnError_ && pSharedState_->stopOnError_(errorCode, bytesSent))
                                   {
                                       lockStop();
                                       // TODO: special error code?
-                                      pImpl_->finalCompletion_(asio::error::operation_aborted);
+                                      pSharedState_->finalCompletion_(asio::error::operation_aborted);
                                       return;
                                   }
 
                                   // TODO: other errors? continue if connection was lost?
                                   if (!errorCode)
                                   {
-                                      std::lock_guard<std::mutex> lockGuard{pImpl_->mutex_};
-                                      if (pImpl_->commands_.empty())
+                                      std::lock_guard<std::mutex> lockGuard{pSharedState_->mutex_};
+                                      if (pSharedState_->commands_.empty())
                                       {
-                                          pImpl_->running_ = false;
+                                          pSharedState_->running_ = false;
                                           return;
                                       }
 
-                                      send_command_t dispatchedCommand = std::move(pImpl_->commands_.front());
-                                      pImpl_->commands_.pop();
+                                      send_command_t dispatchedCommand = std::move(pSharedState_->commands_.front());
+                                      pSharedState_->commands_.pop();
 
                                       // TODO: use dispatch?
                                       asio::dispatch(get_executor(), [this,
@@ -873,14 +915,14 @@ namespace eld
                                       });
 
                                       // old code without using dispatch
-                                      // asyncSend(std::move(pImpl_->commands_.front()));
-                                      // pImpl_->commands_.pop();
+                                      // asyncSend(std::move(pSharedState_->commands_.front()));
+                                      // pSharedState_->commands_.pop();
                                       return;
                                   }
 
                                   // unrecoverable error case
                                   lockStop();
-                                  pImpl_->finalCompletion_(errorCode);
+                                  pSharedState_->finalCompletion_(errorCode);
                                   return;
                               });
         }

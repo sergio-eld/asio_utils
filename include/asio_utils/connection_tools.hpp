@@ -744,6 +744,7 @@ namespace eld
 
         async_send_queue &operator=(async_send_queue &&) noexcept = default;
 
+        // public method to send, maybe provide a final completion handler here?
         template<typename ConstBuffer, typename CompletionToken>
         auto asyncSend(ConstBuffer &&buffer, CompletionToken &&token)
         {

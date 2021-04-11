@@ -80,7 +80,7 @@ void send_data_success(const elements_num_t elements,
     ASSERT_NO_THROW(connected.get());
 
     // TODO: multiple ranges/multiple threads, concurrent invocations
-    // this will throw "promise already satisfied"
+    // this will throw "promise already satisfied" with asio::use_future
     auto sendQueue = eld::make_async_send_queue(client, asio::detached);
 
     // stub implementation to send array in one go
@@ -95,12 +95,14 @@ void send_data_success(const elements_num_t elements,
     // send data
     // one-range simple implementation
     for (size_t t = 0; t != threads; ++t)
-        std::thread([&]()
+        std::thread([&, t]()
                     {
-                        for (size_t sr = 0; sr != subRangesPerThread; ++sr)
+                        for (size_t sr = t * subRangesPerThread;
+                             sr != t * subRangesPerThread + subRangesPerThread;
+                             ++sr)
                         {
                             const std::pair<const_iter, const_iter> &subRange =
-                                    subRangesInput[sr * t];
+                                    subRangesInput[sr];
 
                             const uint32_t *begin = &(*subRange.first);
                             const auto length = (size_t) std::distance(subRange.first,
@@ -114,13 +116,6 @@ void send_data_success(const elements_num_t elements,
                                                 });
                         }
                     }).detach();
-
-    // stub for sending call
-    // auto finishSending = asio::async_write(client, asio::buffer(inputElements), asio::use_future);
-
-    // TODO: explicitly handle exception
-    // wait until all data has been sent
-    // ASSERT_NO_THROW(finishSending.get());
 
     // wait until all data has been received and get it
     std::vector<uint8_t> vecBytesReceived{};
@@ -139,9 +134,15 @@ void send_data_success(const elements_num_t elements,
     std::copy(rawReceivedElements, std::next(rawReceivedElements, elemsReceived),
               std::back_inserter(receivedElements));
 
+    auto receivedSubRanges =
+            e_testing::get_contiguous_subranges(receivedElements.cbegin(),
+                                                receivedElements.cend());
+
     EXPECT_EQ(elemsReceived, inputElements.size());
+    EXPECT_LE(receivedSubRanges.size(), subRangesInput.size());
 
     // TODO: thorough sub-range based comparison
+    std::sort(receivedElements.begin(), receivedElements.end());
     ASSERT_EQ(inputElements, receivedElements);
 }
 
@@ -196,6 +197,14 @@ TEST(compose_send_tcp, success_100000elems_1thread_100chunks)
     send_data_success(elements_num_t(10000),
                       threads_num_t(1),
                       subranges_per_thread_t(100),
+                      std::chrono::milliseconds(0));
+}
+
+TEST(compose_send_tcp, success_100elems_2threads_1chunk)
+{
+    send_data_success(elements_num_t(100),
+                      threads_num_t(2),
+                      subranges_per_thread_t(1),
                       std::chrono::milliseconds(0));
 }
 

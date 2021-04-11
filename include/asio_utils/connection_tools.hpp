@@ -713,6 +713,13 @@ namespace eld
                 send_completion_handler_t>;
 
         // TODO: get_executor
+        using executor_type = typename connection_t::executor_type;
+
+        executor_type get_executor()
+        {
+            return pImpl_->connection_.get_executor();
+        }
+
 
         template<typename CompletionHandlerT,
                 typename = detail::require_constructible<final_completion_t, CompletionHandlerT>>
@@ -811,7 +818,6 @@ namespace eld
 
         void asyncSend(send_command_t &&command)
         {
-            std::cerr << std::this_thread::get_id() << std::endl;
             asio::async_write(pImpl_->connection_, command.first,
                               [this, command =
                               std::move(command.second)](const asio::error_code &errorCode,

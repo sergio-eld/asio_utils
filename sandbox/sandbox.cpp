@@ -7,6 +7,18 @@ using namespace eld;
 
 int main()
 {
+    std::vector<uint32_t> sequence{1, 2, 3, 4, 5, 6, 7, 8};
+    auto subRanges = testing::divide_range(sequence, 3);
+
+    for (const auto& sr : subRanges)
+    {
+        auto iter = sr.first;
+        while (iter != sr.second)
+            std::cout << *iter++ << " ";
+        std::cout << std::endl;
+    }
+
+
     std::vector<uint32_t> input{2, 3,
                                 0, 1,
                                 0, 1,

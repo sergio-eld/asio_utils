@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <numeric>
 #include <chrono>
+#include <cmath>
 
 namespace eld
 {
@@ -110,6 +111,7 @@ namespace eld
 
                     // success
                     stopTimer();
+                    startReceiving();
                 }
 
                 // operator for socket::async_read_some handling
@@ -133,7 +135,10 @@ namespace eld
 
                     std::copy(iterInputBegin, iterInputEnd, std::back_inserter(dataReceived_));
                     if (dataReceived_.size() != expectedBytes_)
+                    {
                         startReceiving();
+                        return;
+                    }
 
                     // finish
                     completion_({}, std::move(dataReceived_));
@@ -272,7 +277,6 @@ namespace eld
                 acceptor_.set_option(tcp::acceptor::reuse_address(true));
             }
 
-            template<typename CompletionToken>
             void start()
             {
                 acceptor_.listen();
@@ -338,6 +342,41 @@ namespace eld
         };
 
         template<typename RandomIter>
+        std::vector<std::pair<RandomIter, RandomIter>>
+        get_contiguous_subranges(RandomIter begin, RandomIter end)
+        {
+            using ranges_t = std::vector<std::pair<RandomIter, RandomIter>>;
+            const auto distance = (size_t) std::distance(begin, end);
+            if (distance < 2)
+                return ranges_t();
+
+            ranges_t ranges{};
+
+            // sequence iterator that stores the beginning of the subsequence
+            auto subSeqBegin = begin,
+                    prev = begin,
+                    iter = begin;
+
+            while (++iter != end)
+            {
+                // if next is not greater than prev by one, start new chunk
+                const int prevVal = int(*prev),
+                        curVal = int(*iter),
+                        diff = curVal - prevVal;
+
+                if (diff != 1)
+                {
+                    ranges.emplace_back(subSeqBegin, iter);
+                    subSeqBegin = iter;
+                }
+                prev = iter;
+            }
+            ranges.emplace_back(subSeqBegin, iter);
+            return ranges;
+        }
+
+// TODO: return ranges (begin, end)
+        template<typename RandomIter>
         std::vector<size_t> get_chunk_lengths(RandomIter begin, RandomIter end)
         {
             const auto distance = (size_t) std::distance(begin, end);
@@ -377,6 +416,60 @@ namespace eld
             std::iota(vec.begin(), vec.end(), start);
             return vec;
         }
+
+// returns a vector of lengths of consequent sub-ranges
+        template<typename Integral>
+        std::vector<size_t> make_subranges(const std::vector<Integral> &input, size_t num)
+        {
+            // input too small to be divided in chunks with more than 1 element
+            if (input.size() <= num)
+            {
+                std::vector<size_t> out(input.size());
+                std::fill(out.begin(), out.end(), 1);
+                return out;
+            }
+
+            auto out = std::vector<size_t>(num);
+            const auto elemsPerRange = (size_t) std::ceil(float(input.size()) / float(num));
+            std::fill(out.begin(), out.end(), input.size() / elemsPerRange);
+            if (input.size() % num)
+                out.back() = input.size() % num;
+
+            return out;
+        }
+
+        // TODO: handle cases when input.size() < numSubRanges
+        template<typename Integral>
+        auto divide_range(const std::vector<Integral> &input, size_t numSubRanges)
+        {
+            assert(numSubRanges && "numSubRanges must be greater than zero!");
+
+            using const_iter = decltype(input.cbegin());
+            using sub_range_t = std::pair<const_iter, const_iter>;
+
+            std::vector<sub_range_t> resSubRanges{};
+
+            const float elemsPerRangeF = float(input.size()) / float(numSubRanges);
+            const size_t elemsPerRange = std::max(size_t(std::ceil(elemsPerRangeF)),
+                                                  size_t(1));
+
+            const_iter begin = input.cbegin();
+
+            while (begin != input.cend())
+            {
+                const size_t elemsInSubRange = std::min((size_t) std::distance(begin, input.cend()),
+                                                        elemsPerRange);
+
+                auto subRangeEnd = std::next(begin, elemsInSubRange);
+                resSubRanges.emplace_back(begin, subRangeEnd);
+                begin = subRangeEnd;
+            }
+
+            assert(numSubRanges >= resSubRanges.size() &&
+                   "Number of result subranges must be less then or equal to requested number");
+            return resSubRanges;
+        }
+
     }
 }
 

@@ -408,12 +408,13 @@ namespace eld
     {
         using elem_t = typename std::iterator_traits<RandomIter>::value_type;
         assert(std::distance(begin, end) >= 0 && "buffer: Invalid range!");
-        const auto *data = reinterpret_cast<const uint8_t*>(&*begin);
-        const size_t sizeInBytes = (size_t)std::distance(begin, end) *
-                (sizeof(elem_t) / sizeof(uint8_t));
+        const auto *data = reinterpret_cast<const uint8_t *>(&*begin);
+        const size_t sizeInBytes = (size_t) std::distance(begin, end) *
+                                   (sizeof(elem_t) / sizeof(uint8_t));
         return asio::buffer(data, sizeInBytes);
     }
 
+    // TODO: add unrecoverable error case?
     // TODO: move to eld::detail?
     template<typename Connection, typename CompletionHandler,
             typename = detail::require_signature<CompletionHandler,
@@ -660,6 +661,17 @@ namespace eld
                                                                           std::forward<Callable>(stopOnError));
     }
 
+    template<typename Connection,
+            typename CompletionHandler>
+    auto make_composed_connection_attempt(Connection &connection,
+                                          CompletionHandler &&completionHandler) ->
+    composed_connection_attempt<Connection, CompletionHandler>
+    {
+        return composed_connection_attempt<Connection, CompletionHandler>(connection,
+                                                                          std::forward<CompletionHandler>(
+                                                                                  completionHandler));
+    }
+
     // TODO: specification for this function
     template<typename Connection,
             typename Endpoint,
@@ -718,22 +730,48 @@ namespace eld
         return result.get();
     }
 
+    template<typename Connection,
+            typename Endpoint,
+            typename Duration,
+            typename CompletionToken>
+    auto async_connection_attempt(Connection &connection,
+                                  Endpoint &&endpoint,
+                                  Duration &&timeout,
+                                  CompletionToken &&completionToken)
+    {
 
+        using result_t = asio::async_result<std::decay_t<CompletionToken>,
+                void(asio::error_code)>;
+        using completion_t = typename result_t::completion_handler_type;
+
+        completion_t completion{std::forward<CompletionToken>(completionToken)};
+        result_t result{completion};
+
+        auto composedConnectionAttempt = make_composed_connection_attempt(connection,
+                                                                          std::forward<completion_t>(completion));
+        composedConnectionAttempt(std::forward<Endpoint>(endpoint),
+                                  std::forward<Duration>(timeout));
+
+        return result.get();
+    }
+
+
+    // TODO: Hide CompletionHandler
     /**
      * Class for a persistent asynchronous queue to send data via series of composed asio::async_write operations.<br>
      * The object uses connections executor. Only one queue is allowed per connection.
      * @tparam Connection type for a connection to be used to asynchronously send data.
-     * @tparam CompletionHandler handler to be invoked upon events:<br>
+     * @tparam (removed) CompletionHandler handler to be invoked upon events:<br>
      * - operation aborted (as a result of external invocation of connection.cancel() method)
      * - unrecoverable error has occurred (todo: to be specified)
      * - user has requested to stop via user provided callback stopOnError
      */
-    template<typename Connection, typename CompletionHandler>
+    template<typename Connection>//, typename CompletionHandler>
     class async_send_queue
     {
     public:
         using connection_t = Connection;
-        using final_completion_t = CompletionHandler;
+        // using final_completion_t = CompletionHandler;
         using completion_signature_t = void(asio::error_code);
         using stop_on_error_signature_t = bool(const asio::error_code &, size_t);
         using send_completion_signature_t = void(const asio::error_code &, size_t);
@@ -757,7 +795,8 @@ namespace eld
          * or upon user's request to stop.
          */
         template<typename CompletionHandlerT,
-                typename = detail::require_constructible<final_completion_t, CompletionHandlerT>>
+                typename = detail::require_constructible</*final_completion_t*/
+                        std::function<completion_signature_t>, CompletionHandlerT>>
         async_send_queue(connection_t &connection,
                          CompletionHandlerT &&completionHandler)
                 : pSharedState_(std::make_shared<impl>(connection,
@@ -774,7 +813,8 @@ namespace eld
          * @param stopOnError user-provided callable to request stop on error.
          */
         template<typename CompletionHandlerT, typename Callable,
-                typename = detail::require_constructible<final_completion_t, CompletionHandlerT>,
+                typename = detail::require_constructible</*final_completion_t*/
+                        std::function<completion_signature_t>, CompletionHandlerT>,
                 typename = detail::require_constructible<std::function<stop_on_error_signature_t>, Callable>>
         async_send_queue(connection_t &connection,
                          CompletionHandlerT &&completionHandler,
@@ -848,8 +888,15 @@ namespace eld
         struct impl
         {
             connection_t &connection_;
-            final_completion_t finalCompletion_;
+            // final_completion_t finalCompletion_;
+            std::function<completion_signature_t> finalCompletion_;
             std::function<stop_on_error_signature_t> stopOnError_;
+
+            std::queue<send_command_t> commands_;
+            std::mutex mutex_;
+
+            // TODO: get rid of running?
+            std::atomic_bool running_{false};
 
             template<typename CompletionHandlerT>
             impl(connection_t &connection, CompletionHandlerT &&handler)
@@ -867,11 +914,6 @@ namespace eld
             {}
 
 
-            std::queue<send_command_t> commands_;
-            std::mutex mutex_;
-
-            // TODO: get rid of running?
-            std::atomic_bool running_{false};
         };
 
         std::shared_ptr<impl> pSharedState_;
@@ -983,7 +1025,7 @@ namespace eld
         completion_t completion{std::forward<CompletionToken>(finalToken)};
         result_t result{completion};
 
-        return detail::get_combined(async_send_queue<Connection, completion_t>(connection,
+        return detail::get_combined(async_send_queue<Connection/*, completion_t*/>(connection,
                                                                                std::move(completion)),
                                     std::move(result));
     }

@@ -68,6 +68,19 @@ namespace eld
                           completion_(std::forward<CompletionHandlerT>(completion))
                 {}
 
+                // TODO: make private/protected to prevent stack-allocation
+                template<typename Executor,
+                        typename CompletionHandlerT,
+                        typename = require_signature_t<completion_signature_t, CompletionHandlerT>>
+                composed_receive_data_tcp(Executor &&executor,
+                                          asio::ip::tcp::endpoint endpoint,
+                                          CompletionHandlerT &&completion)
+                        : acceptor_(std::forward<Executor>(executor),
+                                    std::move(endpoint)),
+                          completion_(std::forward<CompletionHandlerT>(completion))
+                {}
+
+
                 void operator()(size_t expectedBytes, std::chrono::milliseconds timeout)
                 {
                     expectedBytes_ = expectedBytes;
@@ -231,6 +244,7 @@ namespace eld
         template<typename CompletionToken,
                 typename Executor>
         auto async_receive_tcp(Executor &&executor,
+                               asio::ip::tcp::endpoint endpoint,
                                size_t expectedBytes,
                                CompletionToken &&token)
         {
@@ -249,11 +263,25 @@ namespace eld
             constexpr std::chrono::milliseconds timeout = 200ms;
 
             auto procedure = std::make_shared<composed_procedure_t>(std::forward<Executor>(executor),
+                                                                    std::move(endpoint),
                                                                     std::move(completion));
             (*procedure)(expectedBytes, timeout);
 
             return result.get();
         }
+
+        template<typename CompletionToken,
+                typename Executor>
+        auto async_receive_tcp(Executor &&executor,
+                               size_t expectedBytes,
+                               CompletionToken &&token)
+        {
+            return async_receive_tcp(std::forward<Executor>(executor),
+                    asio::ip::tcp::endpoint(asio::ip::make_address_v4(localhost), port),
+                    expectedBytes,
+                    std::forward<CompletionToken>(token));
+        }
+
 
         class receiver
         {

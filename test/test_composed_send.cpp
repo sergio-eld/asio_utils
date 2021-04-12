@@ -8,7 +8,7 @@
 #include <chrono>
 
 #include "asio_utils/connection_tools.hpp"
-#include "test_utils.h"
+#include "asio_utils/testing/test_utils.h"
 
 /*
  * Testing scenarios:

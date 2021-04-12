@@ -28,7 +28,7 @@ public:
         accepting_ = true;
         acceptor_.async_accept(
                 [this](const asio::error_code &errorCode,
-                       asio::ip::tcp::socket peer)
+                       asio::ip::tcp::socket /*peer*/)
                 {
                     if (!errorCode)
                     {
@@ -77,7 +77,7 @@ void runContext(asio::io_context &io_context)
     std::cout << std::string("Stopping thread: ")
                  + threadId + "\n";
     std::cout.flush();
-};
+}
 
 // cancel on 15 timeouts
 TEST(connection_attempt, 15_timeouts)

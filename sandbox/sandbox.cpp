@@ -1,4 +1,4 @@
-﻿
+
 #include "asio_utils/connection_tools.hpp"
 #include "asio_utils/testing/test_utils.h"
 #include <numeric>

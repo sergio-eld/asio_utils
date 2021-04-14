@@ -1,4 +1,4 @@
-﻿
+
 #include <gtest/gtest.h>
 
 #include "asio_utils/connection_tools.hpp"

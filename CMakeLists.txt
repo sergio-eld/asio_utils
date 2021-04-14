@@ -1,9 +1,15 @@
-﻿cmake_minimum_required(VERSION 3.7.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.7.2 FATAL_ERROR)
 
 project(asio_connection_tools LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+
+# disable tests and sandboxes if included as a sub_directory
+get_directory_property(hasParent PARENT_DIRECTORY)
+include(CMakeDependentOption)
+cmake_dependent_option(BUILD_TESTS "Build Tests" ON
+        "NOT hasParent" OFF)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)
 
@@ -23,16 +29,18 @@ target_link_libraries(asio_utils INTERFACE ASIO::ASIO)
 add_library(eld::asio_utils ALIAS asio_utils)
 
 # tests
-find_package(GTest CONFIG REQUIRED)
-enable_testing()
-add_subdirectory(test)
+if (BUILD_TESTS)
+    find_package(GTest CONFIG REQUIRED)
+    enable_testing()
+    add_subdirectory(test)
 
-# sandbox
-add_executable(sandbox sandbox/sandbox.cpp)
-target_link_libraries(sandbox PRIVATE eld::asio_utils)
+    # sandbox
+    add_executable(sandbox sandbox/sandbox.cpp)
+    target_link_libraries(sandbox PRIVATE eld::asio_utils)
 
-add_executable(sb.find_deadlock sandbox/find_deadlock.cpp)
-target_link_libraries(sb.find_deadlock PRIVATE eld::asio_utils)
+    add_executable(sb.find_deadlock sandbox/find_deadlock.cpp)
+    target_link_libraries(sb.find_deadlock PRIVATE eld::asio_utils)
 
-add_executable(example_6 sandbox/example_6.cpp)
-target_link_libraries(example_6 PRIVATE eld::asio_utils)
+    add_executable(example_6 sandbox/example_6.cpp)
+    target_link_libraries(example_6 PRIVATE eld::asio_utils)
+endif()

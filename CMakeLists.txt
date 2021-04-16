@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.7.2 FATAL_ERROR)
+cmake_policy(SET CMP0074 OLD)
 
 project(asio_connection_tools LANGUAGES CXX C)
 

@@ -38,7 +38,7 @@ namespace eld
     {
     };
 
-    chained_completion_t use_chained_completion;
+    constexpr chained_completion_t use_chained_completion;
 
     /*
      * 1) chain_handler invokes current node

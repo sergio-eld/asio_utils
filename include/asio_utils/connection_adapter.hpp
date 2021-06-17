@@ -82,12 +82,12 @@ namespace eld
         {
         }
 
-        template<typename ConfigTFrom,
-                 typename ConfigTTo,
+        template<typename ConfigTA,
+                 typename ConfigTB,
                  typename CompletionT,
                  typename DirectionTag>
-        auto async_run(ConfigTFrom &&a_configFrom,
-                       ConfigTTo &&a_configTo,
+        auto async_run(ConfigTA &&a_configFrom,
+                       ConfigTB &&a_configTo,
                        DirectionTag,
                        CompletionT &&completionToken)
         {
@@ -102,12 +102,12 @@ namespace eld
             const auto &currentState = get_state(DirectionTag());
 
             auto &connectionFrom = get_connection(DirectionTag());
-            const auto configFrom = std::forward<ConfigTFrom>(a_configFrom);
+            const auto configFrom = std::forward<ConfigTA>(a_configFrom);
             const auto &configFromCurrent = custom::get_config(connectionFrom);
 
             auto &connectionTo =
                 get_connection(typename tag::detail::reverse_adapter_tag<DirectionTag>::type());
-            const auto configTo = std::forward<ConfigTTo>(a_configTo);
+            const auto configTo = std::forward<ConfigTB>(a_configTo);
             const auto &configToCurrent = custom::get_config(connectionTo);
 
             const bool equalConfigsFrom = custom::compare_configs(configFrom, configFromCurrent),

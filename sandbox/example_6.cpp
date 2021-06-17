@@ -37,10 +37,11 @@ using asio::ip::tcp;
 // until all underlying async_write operation complete. A one second delay is
 // inserted prior to each write operation, using a steady_timer.
 
-template <typename T, typename CompletionToken>
-auto async_write_messages(tcp::socket& socket,
-                          const T& message, std::size_t repeat_count,
-                          CompletionToken&& token)
+template<typename T, typename CompletionToken>
+auto async_write_messages(tcp::socket &socket,
+                          const T &message,
+                          std::size_t repeat_count,
+                          CompletionToken &&token)
 // The return type of the initiating function is deduced from the combination
 // of CompletionHandler type and the completion handler's signature. When the
 // completion token is a simple callback, the return type is always void.
@@ -76,8 +77,10 @@ auto async_write_messages(tcp::socket& socket,
     // defers initiation would need to make a decay-copy of the arguments, but
     // when using a simple callback the arguments can be trivially forwarded
     // straight through.)
-    auto initiation = [](auto&& completion_handler, tcp::socket& socket,
-                         std::unique_ptr<std::string> encoded_message, std::size_t repeat_count,
+    auto initiation = [](auto &&completion_handler,
+                         tcp::socket &socket,
+                         std::unique_ptr<std::string> encoded_message,
+                         std::size_t repeat_count,
                          std::unique_ptr<asio::steady_timer> delay_timer)
     {
         // In this example, the composed operation's intermediate completion
@@ -87,7 +90,7 @@ auto async_write_messages(tcp::socket& socket,
             // The intermediate completion handler holds a reference to the socket as
             // it is used for multiple async_write operations, as well as for
             // obtaining the I/O executor (see get_executor below).
-            tcp::socket& socket_;
+            tcp::socket &socket_;
 
             // The allocated buffer for the encoded message. The std::unique_ptr
             // smart pointer is move-only, and as a consequence our intermediate
@@ -103,14 +106,19 @@ auto async_write_messages(tcp::socket& socket,
             // To manage the cycle between the multiple underlying asychronous
             // operations, our intermediate completion handler is implemented as a
             // state machine.
-            enum { starting, waiting, writing } state_;
+            enum
+            {
+                starting,
+                waiting,
+                writing
+            } state_;
 
             // As our composed operation performs multiple underlying I/O operations,
             // we should maintain a work object against the I/O executor. This tells
             // the I/O executor that there is still more work to come in the future.
             typename std::decay<decltype(asio::prefer(
-                    std::declval<tcp::socket::executor_type>(),
-                    asio::execution::outstanding_work.tracked))>::type io_work_;
+                std::declval<tcp::socket::executor_type>(),
+                asio::execution::outstanding_work.tracked))>::type io_work_;
 
             // The user-supplied completion handler, called once only on completion
             // of the entire composed operation.
@@ -119,7 +127,7 @@ auto async_write_messages(tcp::socket& socket,
             // By having a default value for the second argument, this function call
             // operator matches the completion signature of both the async_write and
             // steady_timer::async_wait operations.
-            void operator()(const std::error_code& error, std::size_t = 0)
+            void operator()(const std::error_code &error, std::size_t = 0)
             {
                 if (!error)
                 {
@@ -133,14 +141,15 @@ auto async_write_messages(tcp::socket& socket,
                                 state_ = waiting;
                                 delay_timer_->expires_after(std::chrono::seconds(1));
                                 delay_timer_->async_wait(std::move(*this));
-                                return; // Composed operation not yet complete.
+                                return;   // Composed operation not yet complete.
                             }
-                            break; // Composed operation complete, continue below.
+                            break;   // Composed operation complete, continue below.
                         case waiting:
                             state_ = writing;
                             asio::async_write(socket_,
-                                              asio::buffer(*encoded_message_), std::move(*this));
-                            return; // Composed operation not yet complete.
+                                              asio::buffer(*encoded_message_),
+                                              std::move(*this));
+                            return;   // Composed operation not yet complete.
                     }
                 }
 
@@ -162,14 +171,13 @@ auto async_write_messages(tcp::socket& socket,
             // completion handler's associated executor, and default to the I/O
             // executor - in this case the executor of the socket - if the completion
             // handler does not have its own.
-            using executor_type = asio::associated_executor_t<
-                    typename std::decay<decltype(completion_handler)>::type,
-                    tcp::socket::executor_type>;
+            using executor_type =
+                asio::associated_executor_t<typename std::decay<decltype(completion_handler)>::type,
+                                            tcp::socket::executor_type>;
 
             executor_type get_executor() const noexcept
             {
-                return asio::get_associated_executor(
-                        handler_, socket_.get_executor());
+                return asio::get_associated_executor(handler_, socket_.get_executor());
             }
 
             // Although not necessary for correctness, we may also preserve the
@@ -179,27 +187,29 @@ auto async_write_messages(tcp::socket& socket,
             // allocator, and default to std::allocator<void> if the completion
             // handler does not have its own.
             using allocator_type = asio::associated_allocator_t<
-                    typename std::decay<decltype(completion_handler)>::type,
-                    std::allocator<void>>;
+                typename std::decay<decltype(completion_handler)>::type,
+                std::allocator<void>>;
 
             allocator_type get_allocator() const noexcept
             {
-                return asio::get_associated_allocator(
-                        handler_, std::allocator<void>{});
+                return asio::get_associated_allocator(handler_, std::allocator<void>{});
             }
         };
 
         // Initiate the underlying async_write operation using our intermediate
         // completion handler.
         auto encoded_message_buffer = asio::buffer(*encoded_message);
-        asio::async_write(socket, encoded_message_buffer,
-                          intermediate_completion_handler{
-                                  socket, std::move(encoded_message),
-                                  repeat_count, std::move(delay_timer),
-                                  intermediate_completion_handler::starting,
-                                  asio::prefer(socket.get_executor(),
-                                               asio::execution::outstanding_work.tracked),
-                                  std::forward<decltype(completion_handler)>(completion_handler)});
+        asio::async_write(
+            socket,
+            encoded_message_buffer,
+            intermediate_completion_handler{
+                socket,
+                std::move(encoded_message),
+                repeat_count,
+                std::move(delay_timer),
+                intermediate_completion_handler::starting,
+                asio::prefer(socket.get_executor(), asio::execution::outstanding_work.tracked),
+                std::forward<decltype(completion_handler)>(completion_handler) });
     };
 
     // Encode the message and copy it into an allocated buffer. The buffer will
@@ -209,8 +219,7 @@ auto async_write_messages(tcp::socket& socket,
     std::unique_ptr<std::string> encoded_message(new std::string(os.str()));
 
     // Create a steady_timer to be used for the delay between messages.
-    std::unique_ptr<asio::steady_timer> delay_timer(
-            new asio::steady_timer(socket.get_executor()));
+    std::unique_ptr<asio::steady_timer> delay_timer(new asio::steady_timer(socket.get_executor()));
 
     // The asio::async_initiate function takes:
     //
@@ -227,11 +236,12 @@ auto async_write_messages(tcp::socket& socket,
     //
     // Note that we wrap non-const reference arguments in std::reference_wrapper
     // to prevent incorrect decay-copies of these objects.
-    return asio::async_initiate<
-            CompletionToken, void(std::error_code)>(
-            initiation, token, std::ref(socket),
-            std::move(encoded_message), repeat_count,
-            std::move(delay_timer));
+    return asio::async_initiate<CompletionToken, void(std::error_code)>(initiation,
+                                                                        token,
+                                                                        std::ref(socket),
+                                                                        std::move(encoded_message),
+                                                                        repeat_count,
+                                                                        std::move(delay_timer));
 }
 
 //------------------------------------------------------------------------------
@@ -240,12 +250,14 @@ void test_callback()
 {
     asio::io_context io_context;
 
-    tcp::acceptor acceptor(io_context, {tcp::v4(), 55555});
+    tcp::acceptor acceptor(io_context, { tcp::v4(), 55555 });
     tcp::socket socket = acceptor.accept();
 
     // Test our asynchronous operation using a lambda as a callback.
-    async_write_messages(socket, "Testing callback\r\n", 5,
-                         [](const std::error_code& error)
+    async_write_messages(socket,
+                         "Testing callback\r\n",
+                         5,
+                         [](const std::error_code &error)
                          {
                              if (!error)
                              {
@@ -266,14 +278,13 @@ void test_future()
 {
     asio::io_context io_context;
 
-    tcp::acceptor acceptor(io_context, {tcp::v4(), 55555});
+    tcp::acceptor acceptor(io_context, { tcp::v4(), 55555 });
     tcp::socket socket = acceptor.accept();
 
     // Test our asynchronous operation using the use_future completion token.
     // This token causes the operation's initiating function to return a future,
     // which may be used to synchronously wait for the result of the operation.
-    std::future<void> f = async_write_messages(
-            socket, "Testing future\r\n", 5, asio::use_future);
+    std::future<void> f = async_write_messages(socket, "Testing future\r\n", 5, asio::use_future);
 
     io_context.run();
 
@@ -283,7 +294,7 @@ void test_future()
         f.get();
         std::cout << "Messages sent\n";
     }
-    catch (const std::exception& e)
+    catch (const std::exception &e)
     {
         std::cout << "Error: " << e.what() << "\n";
     }

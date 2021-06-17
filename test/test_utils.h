@@ -1,11 +1,11 @@
 ﻿#pragma once
 
 #include <asio.hpp>
-#include <vector>
-#include <cstdint>
-#include <numeric>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <numeric>
+#include <vector>
 
 namespace eld
 {
@@ -18,8 +18,7 @@ namespace eld
         {
             template<typename Signature, typename Callable>
             using require_signature_t = typename std::enable_if<
-                    std::is_constructible<std::function<Signature>, Callable>::value
-            >::type;
+                std::is_constructible<std::function<Signature>, Callable>::value>::type;
 
             // moved out of the class to ease debugging
             template<typename T, T>
@@ -35,7 +34,7 @@ namespace eld
 
             template<typename CompletionHandler>
             struct composed_receive_data_tcp :
-                    std::enable_shared_from_this<composed_receive_data_tcp<CompletionHandler>>
+              std::enable_shared_from_this<composed_receive_data_tcp<CompletionHandler>>
             {
             public:
                 using completion_signature_t = void(asio::error_code, std::vector<uint8_t>);
@@ -59,14 +58,14 @@ namespace eld
 
                 // TODO: make private/protected to prevent stack-allocation
                 template<typename Executor,
-                        typename CompletionHandlerT,
-                        typename = require_signature_t<completion_signature_t, CompletionHandlerT>>
-                composed_receive_data_tcp(Executor &&executor,
-                                          CompletionHandlerT &&completion)
-                        : acceptor_(std::forward<Executor>(executor),
-                                    {asio::ip::make_address_v4(localhost), port}),
-                          completion_(std::forward<CompletionHandlerT>(completion))
-                {}
+                         typename CompletionHandlerT,
+                         typename = require_signature_t<completion_signature_t, CompletionHandlerT>>
+                composed_receive_data_tcp(Executor &&executor, CompletionHandlerT &&completion)
+                  : acceptor_(std::forward<Executor>(executor),
+                              { asio::ip::make_address_v4(localhost), port }),
+                    completion_(std::forward<CompletionHandlerT>(completion))
+                {
+                }
 
                 void operator()(size_t expectedBytes, std::chrono::milliseconds timeout)
                 {
@@ -75,8 +74,7 @@ namespace eld
 
                     if (!expectedBytes)
                     {
-                        completion_(asio::error_code(),
-                                    std::vector<uint8_t>());
+                        completion_(asio::error_code(), std::vector<uint8_t>());
                         return;
                     }
 
@@ -86,7 +84,8 @@ namespace eld
 
                 // operator for steady_timer::async_wait handling
                 template<status S>
-                void operator()(timeout_tag<status, S> timeoutTag, const asio::error_code &errorCode)
+                void operator()(timeout_tag<status, S> timeoutTag,
+                                const asio::error_code &errorCode)
                 {
                     // timer was cancelled
                     if (errorCode == asio::error::operation_aborted)
@@ -104,8 +103,9 @@ namespace eld
                     if (errorCode)
                     {
                         completion_(errorCode == asio::error::operation_aborted ?
-                                    asio::error::timed_out : errorCode,
-                                    std::vector<uint8_t>()); // will not compile with {}
+                                        asio::error::timed_out :
+                                        errorCode,
+                                    std::vector<uint8_t>());   // will not compile with {}
                         return;
                     }
 
@@ -123,7 +123,8 @@ namespace eld
                     if (errorCode)
                     {
                         completion_(errorCode == asio::error::operation_aborted ?
-                                    asio::error::timed_out : errorCode,
+                                        asio::error::timed_out :
+                                        errorCode,
                                     std::move(dataReceived_));
                         return;
                     }
@@ -131,7 +132,7 @@ namespace eld
                     // successful read
                     stopTimer();
                     const auto iterInputBegin = inputBuffer_.cbegin(),
-                            iterInputEnd = std::next(iterInputBegin, bytesRead);
+                               iterInputEnd = std::next(iterInputBegin, bytesRead);
 
                     std::copy(iterInputBegin, iterInputEnd, std::back_inserter(dataReceived_));
                     if (dataReceived_.size() != expectedBytes_)
@@ -153,8 +154,7 @@ namespace eld
                     }
                     catch (const asio::error_code &errorCode)
                     {
-                        std::cerr << "Destructor exception: " <<
-                                  errorCode.message() << std::endl;
+                        std::cerr << "Destructor exception: " << errorCode.message() << std::endl;
                     }
                 }
 
@@ -164,21 +164,15 @@ namespace eld
                 size_t expectedBytes_;
                 std::chrono::milliseconds timeout_;
 
-                asio::ip::tcp::socket peer_{acceptor_.get_executor()};
+                asio::ip::tcp::socket peer_{ acceptor_.get_executor() };
 
                 std::vector<uint8_t> inputBuffer_ = std::vector<uint8_t>(2048);
                 std::vector<uint8_t> dataReceived_;
-                asio::steady_timer timeoutTimer_{acceptor_.get_executor()};
+                asio::steady_timer timeoutTimer_{ acceptor_.get_executor() };
 
-                void cancel(timeout_accepting_t)
-                {
-                    acceptor_.cancel();
-                }
+                void cancel(timeout_accepting_t) { acceptor_.cancel(); }
 
-                void cancel(timeout_receiving_t)
-                {
-                    peer_.cancel();
-                }
+                void cancel(timeout_receiving_t) { peer_.cancel(); }
 
                 template<status S>
                 void startTimer(timeout_tag<status, S>)
@@ -186,17 +180,12 @@ namespace eld
                     // automatically cancels the timer's asynchronous wait
                     timeoutTimer_.expires_after(timeout_);
 
-                    timeoutTimer_.async_wait([this, keepAlive =
-                    this->shared_from_this()](const asio::error_code &errorCode)
-                                             {
-                                                 (*this)(timeout_tag<status, S>(), errorCode);
-                                             });
+                    timeoutTimer_.async_wait([this, keepAlive = this->shared_from_this()](
+                                                 const asio::error_code &errorCode)
+                                             { (*this)(timeout_tag<status, S>(), errorCode); });
                 }
 
-                void stopTimer()
-                {
-                    timeoutTimer_.cancel();
-                }
+                void stopTimer() { timeoutTimer_.cancel(); }
 
                 // use bind instead?
                 void startAccepting()
@@ -206,11 +195,10 @@ namespace eld
                     acceptor_.set_option(tcp::acceptor::reuse_address(true));
                     startTimer(timeout_accepting);
 
-                    acceptor_.async_accept(peer_, [this, keepAlive =
-                    this->shared_from_this()](const asio::error_code &errorCode)
-                    {
-                        (*this)(accepting_peer, errorCode);
-                    });
+                    acceptor_.async_accept(peer_,
+                                           [this, keepAlive = this->shared_from_this()](
+                                               const asio::error_code &errorCode)
+                                           { (*this)(accepting_peer, errorCode); });
                 }
 
                 // use bind instead?
@@ -218,38 +206,34 @@ namespace eld
                 {
                     startTimer(timeout_receiving);
                     peer_.async_read_some(asio::buffer(inputBuffer_),
-                                          [this, sharedPtr =
-                                          this->shared_from_this()](const asio::error_code &errorCode,
-                                                                    size_t bytesReceived)
-                                          {
-                                              (*this)(receiving_data, errorCode, bytesReceived);
-                                          });
+                                          [this, sharedPtr = this->shared_from_this()](
+                                              const asio::error_code &errorCode,
+                                              size_t bytesReceived)
+                                          { (*this)(receiving_data, errorCode, bytesReceived); });
                 }
             };
         }
 
-        template<typename CompletionToken,
-                typename Executor>
-        auto async_receive_tcp(Executor &&executor,
-                               size_t expectedBytes,
-                               CompletionToken &&token)
+        template<typename CompletionToken, typename Executor>
+        auto async_receive_tcp(Executor &&executor, size_t expectedBytes, CompletionToken &&token)
         {
             using asio::ip::tcp;
             using namespace detail;
             using namespace std::chrono_literals;
 
             using result_t = asio::async_result<std::decay_t<CompletionToken>,
-                    void(asio::error_code, std::vector<uint8_t>)>;
+                                                void(asio::error_code, std::vector<uint8_t>)>;
             using completion_t = typename result_t::completion_handler_type;
             using composed_procedure_t = composed_receive_data_tcp<completion_t>;
 
-            completion_t completion{std::forward<CompletionToken>(token)};
-            result_t result{completion};
+            completion_t completion{ std::forward<CompletionToken>(token) };
+            result_t result{ completion };
 
             constexpr std::chrono::milliseconds timeout = 200ms;
 
-            auto procedure = std::make_shared<composed_procedure_t>(std::forward<Executor>(executor),
-                                                                    std::move(completion));
+            auto procedure =
+                std::make_shared<composed_procedure_t>(std::forward<Executor>(executor),
+                                                       std::move(completion));
             (*procedure)(expectedBytes, timeout);
 
             return result.get();
@@ -258,11 +242,10 @@ namespace eld
         class receiver
         {
         public:
-
             template<typename Executor>
             explicit receiver(Executor &executor)
-                    : acceptor_(executor, {asio::ip::make_address_v4(localhost), port}),
-                      peer_(executor)
+              : acceptor_(executor, { asio::ip::make_address_v4(localhost), port }),
+                peer_(executor)
             {
                 using asio::ip::tcp;
                 acceptor_.set_option(tcp::acceptor::reuse_address(true));
@@ -270,8 +253,8 @@ namespace eld
 
             template<typename Executor>
             explicit receiver(Executor executor)
-                    : acceptor_(executor, {asio::ip::make_address_v4(localhost), port}),
-                      peer_(executor)
+              : acceptor_(executor, { asio::ip::make_address_v4(localhost), port }),
+                peer_(executor)
             {
                 using asio::ip::tcp;
                 acceptor_.set_option(tcp::acceptor::reuse_address(true));
@@ -280,13 +263,15 @@ namespace eld
             void start()
             {
                 acceptor_.listen();
-                acceptor_.async_accept(peer_, [this](const asio::error_code &errorCode)
-                {
-                    if (!errorCode)
-                        return startReadLoop();
+                acceptor_.async_accept(peer_,
+                                       [this](const asio::error_code &errorCode)
+                                       {
+                                           if (!errorCode)
+                                               return startReadLoop();
 
-                    std::cerr << "Server error: " << errorCode.message() << std::endl;
-                });
+                                           std::cerr << "Server error: " << errorCode.message()
+                                                     << std::endl;
+                                       });
             }
 
             void stop()
@@ -295,16 +280,14 @@ namespace eld
                 acceptor_.close();
             }
 
-            size_t bytesReceived() const
-            {
-                return dataReceived_.size();
-            }
+            size_t bytesReceived() const { return dataReceived_.size(); }
 
             template<typename T>
             void getData(std::vector<T> &data)
             {
                 const auto *received = reinterpret_cast<const T *>(dataReceived_.data());
-                std::copy(received, std::next(received, dataReceived_.size() / sizeof(T)),
+                std::copy(received,
+                          std::next(received, dataReceived_.size() / sizeof(T)),
                           std::back_inserter(data));
             }
 
@@ -320,49 +303,44 @@ namespace eld
 
             void startReadLoop()
             {
-                peer_.async_receive(asio::buffer(readBuffer_),
-                                    [this](const asio::error_code &errorCode,
-                                           size_t bytesReceived)
-                                    {
-                                        if (!errorCode)
-                                        {
-                                            std::copy(readBuffer_.cbegin(),
-                                                      std::next(readBuffer_.cbegin(), bytesReceived),
-                                                      std::back_inserter(dataReceived_));
-                                            return startReadLoop();
-                                        }
+                peer_.async_receive(
+                    asio::buffer(readBuffer_),
+                    [this](const asio::error_code &errorCode, size_t bytesReceived)
+                    {
+                        if (!errorCode)
+                        {
+                            std::copy(readBuffer_.cbegin(),
+                                      std::next(readBuffer_.cbegin(), bytesReceived),
+                                      std::back_inserter(dataReceived_));
+                            return startReadLoop();
+                        }
 
-                                        if (errorCode == asio::error::operation_aborted)
-                                            return;
+                        if (errorCode == asio::error::operation_aborted)
+                            return;
 
-                                        std::cerr << "Server error: " << errorCode.message() << std::endl;
-
-                                    });
+                        std::cerr << "Server error: " << errorCode.message() << std::endl;
+                    });
             }
         };
 
         template<typename RandomIter>
-        std::vector<std::pair<RandomIter, RandomIter>>
-        get_contiguous_subranges(RandomIter begin, RandomIter end)
+        std::vector<std::pair<RandomIter, RandomIter>> get_contiguous_subranges(RandomIter begin,
+                                                                                RandomIter end)
         {
             using ranges_t = std::vector<std::pair<RandomIter, RandomIter>>;
-            const auto distance = (size_t) std::distance(begin, end);
+            const auto distance = (size_t)std::distance(begin, end);
             if (distance < 2)
                 return ranges_t();
 
             ranges_t ranges{};
 
             // sequence iterator that stores the beginning of the subsequence
-            auto subSeqBegin = begin,
-                    prev = begin,
-                    iter = begin;
+            auto subSeqBegin = begin, prev = begin, iter = begin;
 
             while (++iter != end)
             {
                 // if next is not greater than prev by one, start new chunk
-                const int prevVal = int(*prev),
-                        curVal = int(*iter),
-                        diff = curVal - prevVal;
+                const int prevVal = int(*prev), curVal = int(*iter), diff = curVal - prevVal;
 
                 if (diff != 1)
                 {
@@ -375,27 +353,23 @@ namespace eld
             return ranges;
         }
 
-// TODO: return ranges (begin, end)
+        // TODO: return ranges (begin, end)
         template<typename RandomIter>
         std::vector<size_t> get_chunk_lengths(RandomIter begin, RandomIter end)
         {
-            const auto distance = (size_t) std::distance(begin, end);
+            const auto distance = (size_t)std::distance(begin, end);
             if (distance < 2)
-                return {distance};
+                return { distance };
 
             std::vector<size_t> lengths{};
 
             // sequence iterator that stores the beginning of the subsequence
-            auto subSeqBegin = begin,
-                    prev = begin,
-                    iter = begin;
+            auto subSeqBegin = begin, prev = begin, iter = begin;
 
             while (++iter != end)
             {
                 // if next is not greater than prev by one, start new chunk
-                const int prevVal = int(*prev),
-                        curVal = int(*iter),
-                        diff = curVal - prevVal;
+                const int prevVal = int(*prev), curVal = int(*iter), diff = curVal - prevVal;
                 if (diff != 1)
                 {
                     lengths.emplace_back(std::distance(subSeqBegin, iter));
@@ -417,7 +391,7 @@ namespace eld
             return vec;
         }
 
-// returns a vector of lengths of consequent sub-ranges
+        // returns a vector of lengths of consequent sub-ranges
         template<typename Integral>
         std::vector<size_t> make_subranges(const std::vector<Integral> &input, size_t num)
         {
@@ -430,7 +404,7 @@ namespace eld
             }
 
             auto out = std::vector<size_t>(num);
-            const auto elemsPerRange = (size_t) std::ceil(float(input.size()) / float(num));
+            const auto elemsPerRange = (size_t)std::ceil(float(input.size()) / float(num));
             std::fill(out.begin(), out.end(), input.size() / elemsPerRange);
             if (input.size() % num)
                 out.back() = input.size() % num;
@@ -450,15 +424,14 @@ namespace eld
             std::vector<sub_range_t> resSubRanges{};
 
             const float elemsPerRangeF = float(input.size()) / float(numSubRanges);
-            const size_t elemsPerRange = std::max(size_t(std::ceil(elemsPerRangeF)),
-                                                  size_t(1));
+            const size_t elemsPerRange = std::max(size_t(std::ceil(elemsPerRangeF)), size_t(1));
 
             const_iter begin = input.cbegin();
 
             while (begin != input.cend())
             {
-                const size_t elemsInSubRange = std::min((size_t) std::distance(begin, input.cend()),
-                                                        elemsPerRange);
+                const size_t elemsInSubRange =
+                    std::min((size_t)std::distance(begin, input.cend()), elemsPerRange);
 
                 auto subRangeEnd = std::next(begin, elemsInSubRange);
                 resSubRanges.emplace_back(begin, subRangeEnd);
@@ -472,5 +445,3 @@ namespace eld
 
     }
 }
-
-

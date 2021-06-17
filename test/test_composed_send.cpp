@@ -1,11 +1,11 @@
 ﻿
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
-#include <vector>
 #include <iostream>
 #include <numeric>
-#include <chrono>
+#include <vector>
 
 #include "asio_utils/connection_tools.hpp"
 #include "test_utils.h"
@@ -15,8 +15,8 @@
  * 1) Sending data successfully:
  *    async_send_queue serializes asynchronous composed requests to send data.
  *    According to specification asio::async_write sends data in chunks in zero or more calls.
- *    async_send_queue guarantees that at any time only one call to asio::async_write will be processed
- *    regardless of the thread of invocation or number of simultaneous calls made.
+ *    async_send_queue guarantees that at any time only one call to asio::async_write will be
+ * processed regardless of the thread of invocation or number of simultaneous calls made.
  *
  *    The test sends a contiguous array of increasing integers (next element is increased by 1).
  *    Data can be sent in one or more calls from one or more threads.
@@ -50,7 +50,7 @@ void send_data_success(const elements_num_t elements,
     using asio::ip::tcp;
 
     // sending and receiving in different threads
-    asio::thread_pool threadPool{2};
+    asio::thread_pool threadPool{ 2 };
 
     const size_t expectedBytes = elements * (sizeof(uint32_t) / sizeof(uint8_t));
 
@@ -58,23 +58,22 @@ void send_data_success(const elements_num_t elements,
                                                          expectedBytes,
                                                          asio::use_future);
 
-    tcp::socket client{asio::make_strand(threadPool)};
-    const tcp::endpoint endpoint{asio::ip::make_address_v4(e_testing::localhost),
-                                 e_testing::port};
+    tcp::socket client{ asio::make_strand(threadPool) };
+    const tcp::endpoint endpoint{ asio::ip::make_address_v4(e_testing::localhost),
+                                  e_testing::port };
 
     // begin establishing connection
     auto connected = client.async_connect(endpoint, asio::use_future);
 
     // prepare data to be sent
     const std::vector<uint32_t> inputElements =
-            e_testing::make_increasing_range(uint32_t(0), elements);
+        e_testing::make_increasing_range(uint32_t(0), elements);
 
     using const_iter = decltype(inputElements.cbegin());
     const size_t subrangesTotal = threads * subRangesPerThread;
 
     const std::vector<std::pair<const_iter, const_iter>> subRangesInput =
-            e_testing::divide_range(inputElements, subrangesTotal);
-
+        e_testing::divide_range(inputElements, subrangesTotal);
 
     // TODO: explicitly handle exception
     ASSERT_NO_THROW(connected.get());
@@ -84,40 +83,41 @@ void send_data_success(const elements_num_t elements,
     auto sendQueue = eld::make_async_send_queue(client, asio::detached);
 
     // stub implementation to send array in one go
-//    sendQueue.asyncSend(asio::buffer(inputElements),
-//                              [&](const asio::error_code &errorCode, size_t bytesSent)
-//                              {
-//                                  EXPECT_FALSE(errorCode);
-//                                  EXPECT_EQ(inputElements.size(), bytesSent /
-//                                                    (sizeof(uint32_t) / sizeof(uint8_t)));
-//                              });
+    //    sendQueue.asyncSend(asio::buffer(inputElements),
+    //                              [&](const asio::error_code &errorCode, size_t bytesSent)
+    //                              {
+    //                                  EXPECT_FALSE(errorCode);
+    //                                  EXPECT_EQ(inputElements.size(), bytesSent /
+    //                                                    (sizeof(uint32_t) / sizeof(uint8_t)));
+    //                              });
 
     // send data
     // one-range simple implementation
     for (size_t t = 0; t != threads; ++t)
-        std::thread([&, t]()
-                    {
-                        for (size_t sr = t * subRangesPerThread;
-                             sr != t * subRangesPerThread + subRangesPerThread;
-                             ++sr)
+        std::thread(
+            [&, t]()
+            {
+                for (size_t sr = t * subRangesPerThread;
+                     sr != t * subRangesPerThread + subRangesPerThread;
+                     ++sr)
+                {
+                    const std::pair<const_iter, const_iter> &subRange = subRangesInput[sr];
+
+                    const auto length = (size_t)std::distance(subRange.first, subRange.second),
+                               sizeInBytes = length * (sizeof(uint32_t) / sizeof(uint8_t));
+
+                    sendQueue.asyncSend(
+                        eld::buffer(subRange.first, subRange.second),
+                        [sizeInBytes](const asio::error_code &errorCode, size_t bytesSent)
                         {
-                            const std::pair<const_iter, const_iter> &subRange =
-                                    subRangesInput[sr];
-
-                            const auto length = (size_t) std::distance(subRange.first,
-                                                                       subRange.second),
-                                    sizeInBytes = length * (sizeof(uint32_t) / sizeof(uint8_t));
-
-                            sendQueue.asyncSend(eld::buffer(subRange.first, subRange.second),
-                                                [sizeInBytes](const asio::error_code &errorCode, size_t bytesSent)
-                                                {
-                                                    EXPECT_FALSE(errorCode);
-                                                    EXPECT_EQ(sizeInBytes, bytesSent);
-                                                });
-                            if (intervalBetweenSends.count())
-                                std::this_thread::sleep_for(intervalBetweenSends);
-                        }
-                    }).detach();
+                            EXPECT_FALSE(errorCode);
+                            EXPECT_EQ(sizeInBytes, bytesSent);
+                        });
+                    if (intervalBetweenSends.count())
+                        std::this_thread::sleep_for(intervalBetweenSends);
+                }
+            })
+            .detach();
 
     // wait until all data has been received and get it
     std::vector<uint8_t> vecBytesReceived{};
@@ -131,14 +131,13 @@ void send_data_success(const elements_num_t elements,
     std::vector<uint32_t> receivedElements{};
     const uint8_t *rawReceivedBytes = vecBytesReceived.data();
     const auto *rawReceivedElements = reinterpret_cast<const uint32_t *>(rawReceivedBytes);
-    const size_t elemsReceived = vecBytesReceived.size() /
-                                 (sizeof(uint32_t) / sizeof(uint8_t));
-    std::copy(rawReceivedElements, std::next(rawReceivedElements, elemsReceived),
+    const size_t elemsReceived = vecBytesReceived.size() / (sizeof(uint32_t) / sizeof(uint8_t));
+    std::copy(rawReceivedElements,
+              std::next(rawReceivedElements, elemsReceived),
               std::back_inserter(receivedElements));
 
     auto receivedSubRanges =
-            e_testing::get_contiguous_subranges(receivedElements.cbegin(),
-                                                receivedElements.cend());
+        e_testing::get_contiguous_subranges(receivedElements.cbegin(), receivedElements.cend());
 
     EXPECT_EQ(elemsReceived, inputElements.size());
     EXPECT_LE(receivedSubRanges.size(), subRangesInput.size());
@@ -229,14 +228,13 @@ TEST(compose_send_tcp, success_10000000elems_all_threads_10chunks)
 }
 
 // this causes segfault for some reason
-//TEST(compose_send_tcp, success_100000000elems_all_threads_10chunks)
+// TEST(compose_send_tcp, success_100000000elems_all_threads_10chunks)
 //{
 //    send_data_success(elements_num_t(100000000),
 //                      threads_num_t(std::thread::hardware_concurrency()),
 //                      subranges_per_thread_t(10),
 //                      std::chrono::milliseconds(0));
 //}
-
 
 // TODO: check for race conditions in sender
 

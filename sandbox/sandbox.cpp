@@ -1,16 +1,18 @@
 ﻿
-#include "asio_utils/connection_tools.hpp"
 #include "../test/test_utils.h"
+#include "asio_utils/connection_adapter.hpp"
+#include "asio_utils/connection_tools.hpp"
+
 #include <numeric>
 
 using namespace eld;
 
 int main()
 {
-    std::vector<uint32_t> sequence{1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<uint32_t> sequence{ 1, 2, 3, 4, 5, 6, 7, 8 };
     auto subRanges = testing::divide_range(sequence, 3);
 
-    for (const auto& sr : subRanges)
+    for (const auto &sr : subRanges)
     {
         auto iter = sr.first;
         while (iter != sr.second)
@@ -18,13 +20,7 @@ int main()
         std::cout << std::endl;
     }
 
-
-    std::vector<uint32_t> input{2, 3,
-                                0, 1,
-                                0, 1,
-                                3,
-                                50, 51, 52, 53,
-                                4};
+    std::vector<uint32_t> input{ 2, 3, 0, 1, 0, 1, 3, 50, 51, 52, 53, 4 };
 
     auto lengths = testing::get_chunk_lengths(input.cbegin(), input.cend());
 
@@ -37,7 +33,7 @@ int main()
     {
         auto emptyVec = res.get();
     }
-    catch (const std::system_error& errorCode)
+    catch (const std::system_error &errorCode)
     {
         std::cerr << errorCode.what() << std::endl;
     }

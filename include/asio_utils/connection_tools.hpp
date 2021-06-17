@@ -1,14 +1,14 @@
 ﻿#pragma once
 
-#include <type_traits>
-#include <iterator>
-#include <queue>
 #include <atomic>
+#include <iterator>
 #include <mutex>
+#include <queue>
+#include <type_traits>
 
 #include <chrono>
-#include <future>
 #include <functional>
+#include <future>
 #include <memory>
 
 // TODO: remove
@@ -30,7 +30,8 @@
  * Result of a CompletionHandler is specialized with the first callback Signature.
  *
  * auto chainedContinuation = async_composed_operation(Args..., use_chained_token)
- * auto nextChainedContinuation = async_continuation_chain(std::move(chainedContinuation), nextAsyncCallable);
+ * auto nextChainedContinuation = async_continuation_chain(std::move(chainedContinuation),
+ * nextAsyncCallable);
  */
 namespace eld
 {
@@ -55,7 +56,7 @@ namespace eld
     template<typename Signature>
     struct chained_continuation_node_next_base;
 
-    template<typename ... Args>
+    template<typename... Args>
     struct chained_continuation_node_next_base<void(Args...)>
     {
         using signature_t = void(Args...);
@@ -69,26 +70,23 @@ namespace eld
     class chained_continuation_node_next;
 
     // Callable must provide void operator()(void(Args...));
-    template<typename ... Args, typename Callable>
+    template<typename... Args, typename Callable>
     class chained_continuation_node_next<void(Args...), Callable> :
-            chained_continuation_node_next_base<void(Args...)>
+      chained_continuation_node_next_base<void(Args...)>
     {
     public:
-
         chained_continuation_node_next() = delete;
 
         template<typename CallableT>
         explicit chained_continuation_node_next(CallableT &&callable)
-                : callable_(std::forward<Callable>(callable))
-        {}
+          : callable_(std::forward<Callable>(callable))
+        {
+        }
 
         // TODO: no move or copy
 
         // TODO: move args to callable?
-        void operator()(Args... args) override
-        {
-            callable_(args...);
-        }
+        void operator()(Args... args) override { callable_(args...); }
 
     private:
         Callable callable_;
@@ -97,7 +95,7 @@ namespace eld
     template<typename Signature>
     class chained_continuation_node;
 
-    template<typename ... Args>
+    template<typename... Args>
     class chained_continuation_node<void(Args...)>
     {
     public:
@@ -109,10 +107,10 @@ namespace eld
         // TODO: force initialization with defaulted callback?
 
         // invoke next node or store result
-        template<typename ... ArgsT>
-        void operator()(ArgsT &&... args)
+        template<typename... ArgsT>
+        void operator()(ArgsT &&...args)
         {
-            std::lock_guard<std::mutex> lockGuard{mutex_};
+            std::lock_guard<std::mutex> lockGuard{ mutex_ };
             if (next_)
             {
                 (*next_)(std::forward<ArgsT>(args)...);
@@ -124,12 +122,11 @@ namespace eld
             ready_ = true;
         }
 
-
         void assign_next(std::shared_ptr<next_t> next)
         {
             assert(next && "Trying to assign an empty next node");
             {
-                std::lock_guard<std::mutex> lockGuard{mutex_};
+                std::lock_guard<std::mutex> lockGuard{ mutex_ };
                 next_ = next;
             }
             if (ready_)
@@ -142,16 +139,15 @@ namespace eld
 
         // no references allowed here
         std::tuple<Args...> storedResult_;
-        std::atomic_bool ready_{false};
+        std::atomic_bool ready_{ false };
 
-        template<typename ... ArgsT, size_t ... Indx>
+        template<typename... ArgsT, size_t... Indx>
         void self_invoke(std::tuple<ArgsT...> &tuple, std::index_sequence<Indx...>)
         {
             (*this)(std::forward<std::tuple_element_t<Indx, decltype(storedResult_)>>(
-                    std::get<Indx>(tuple))...);
+                std::get<Indx>(tuple))...);
         }
     };
-
 
     template<typename Signature>
     class chained_continuation;
@@ -159,33 +155,30 @@ namespace eld
     template<typename Signature>
     class chained_continuation_handler;
 
-    template<typename ... Args>
+    template<typename... Args>
     class chained_continuation_handler<void(Args...)>
     {
     public:
         using sugnature_t = void(Args...);
 
         explicit chained_continuation_handler(chained_completion_t)
-                : node_(std::make_shared<chained_continuation_node<sugnature_t>>())
-        {}
+          : node_(std::make_shared<chained_continuation_node<sugnature_t>>())
+        {
+        }
 
-        template<typename ... ArgsT>
-        void operator()(ArgsT ... args)
+        template<typename... ArgsT>
+        void operator()(ArgsT... args)
         {
             assert(node_ && "Implementation was not initialized!");
             (*node_)(std::forward<ArgsT>(args)...);
         }
 
     private:
-        std::shared_ptr<chained_continuation_node<sugnature_t>>
-                node_;
+        std::shared_ptr<chained_continuation_node<sugnature_t>> node_;
 
         friend class chained_continuation<sugnature_t>;
 
-        auto get_node()
-        {
-            return node_;
-        }
+        auto get_node() { return node_; }
     };
 
     // stores current node
@@ -194,8 +187,9 @@ namespace eld
     {
     public:
         explicit chained_continuation(chained_continuation_handler<Signature> &handler)
-                : node_(handler.get_node())
-        {}
+          : node_(handler.get_node())
+        {
+        }
 
         chained_continuation(const chained_continuation &) = delete;
 
@@ -206,26 +200,17 @@ namespace eld
         chained_continuation &operator=(chained_continuation &&) noexcept = default;
 
         // TODO: require Callable to have compatible Signature
-//        template<typename Callable, typename CompletionToken>
-//        auto operator()(Callable &&nextCall, CompletionToken &&token)
-//        {
-//            // TODO: return next chained_continuation
-//        }
+        //        template<typename Callable, typename CompletionToken>
+        //        auto operator()(Callable &&nextCall, CompletionToken &&token)
+        //        {
+        //            // TODO: return next chained_continuation
+        //        }
 
-        bool valid() const
-        {
-            return node_;
-        }
+        bool valid() const { return node_; }
 
-        operator bool() const
-        {
-            return valid();
-        }
+        operator bool() const { return valid(); }
 
-        auto get_node()
-        {
-            return node_;
-        }
+        auto get_node() { return node_; }
 
         /*
          * TODO:
@@ -237,7 +222,6 @@ namespace eld
         //
 
     private:
-
         // TODO: this is not a node, it is just a callback!
         std::shared_ptr<chained_continuation_node<Signature>> node_;
     };
@@ -246,68 +230,62 @@ namespace eld
 namespace asio
 {
     template<typename Signature>
-    class async_result<eld::chained_completion_t,
-            Signature>
+    class async_result<eld::chained_completion_t, Signature>
     {
     public:
         using completion_handler_type = eld::chained_continuation_handler<Signature>;
         using return_type = eld::chained_continuation<Signature>;
 
-        explicit async_result(completion_handler_type &handler)
-                : continuation_(handler)
-        {}
+        explicit async_result(completion_handler_type &handler) : continuation_(handler) {}
 
-        return_type get()
-        {
-            return std::move(continuation_);
-        }
+        return_type get() { return std::move(continuation_); }
 
         template<typename Initiation,
-                //typename RawCompletionToken,
-                typename... Args>
-        static return_type initiate(
-                Initiation &&initiation,
-//                RawCompletionToken && token,
-                eld::chained_completion_t token,
-                Args &&... args)
+                 // typename RawCompletionToken,
+                 typename... Args>
+        static return_type initiate(Initiation &&initiation,
+                                    //                RawCompletionToken && token,
+                                    eld::chained_completion_t token,
+                                    Args &&...args)
         {
             // TODO: what?
-            completion_handler_type handler{token};
-            return_type chainedContinuation{handler};
-            std::forward<Initiation>(initiation)(std::move(handler),
-                                                 std::forward<Args>(args)...);
+            completion_handler_type handler{ token };
+            return_type chainedContinuation{ handler };
+            std::forward<Initiation>(initiation)(std::move(handler), std::forward<Args>(args)...);
 
             return chainedContinuation;
         }
 
         // TODO: implement this
-//        template<typename Initiation,
-//                typename NextSignature,
-//                typename ... Args>
-//        static eld::chained_continuation<NextSignature> initiate(Initiation &&initiation,
-//                                                                 return_type &&prevContinuation,
-//                                                                 Args &&... args)
-//        {
-//            using next_continuation_t = eld::chained_continuation<NextSignature>;
-//            using next_chained_handler_t = eld::chained_continuation_handler<NextSignature>;
-//
-//            // initiation is initialized with next_chained_handler
-//
-//            // create next_node that will invoke initiation
-//
-//
-//
-////            next_chained_handler_t nextHandler{eld::use_chained_completion};
-////            next_continuation_t nextContinuation{nextHandler};
-////
-////            return_type prev = std::move(prevContinuation);
-////            prev.get_node()->assign_next(nextContinuation.get_node());
-////
-////            completion_handler_type handler{token};
-////            return_type chainedContinuation{handler};
-////            std::forward<Initiation>(initiation)(std::move(handler),
-////                                                 std::forward<Args>(args)...);
-//        }
+        //        template<typename Initiation,
+        //                typename NextSignature,
+        //                typename ... Args>
+        //        static eld::chained_continuation<NextSignature> initiate(Initiation &&initiation,
+        //                                                                 return_type
+        //                                                                 &&prevContinuation, Args
+        //                                                                 &&... args)
+        //        {
+        //            using next_continuation_t = eld::chained_continuation<NextSignature>;
+        //            using next_chained_handler_t =
+        //            eld::chained_continuation_handler<NextSignature>;
+        //
+        //            // initiation is initialized with next_chained_handler
+        //
+        //            // create next_node that will invoke initiation
+        //
+        //
+        //
+        ////            next_chained_handler_t nextHandler{eld::use_chained_completion};
+        ////            next_continuation_t nextContinuation{nextHandler};
+        ////
+        ////            return_type prev = std::move(prevContinuation);
+        ////            prev.get_node()->assign_next(nextContinuation.get_node());
+        ////
+        ////            completion_handler_type handler{token};
+        ////            return_type chainedContinuation{handler};
+        ////            std::forward<Initiation>(initiation)(std::move(handler),
+        ////                                                 std::forward<Args>(args)...);
+        //        }
 
     private:
         return_type continuation_;
@@ -316,7 +294,6 @@ namespace asio
 
 namespace eld
 {
-
     namespace traits
     {
         template<typename Connection>
@@ -326,8 +303,8 @@ namespace eld
     namespace detail
     {
         template<typename SteadyTimer>
-        using require_steady_timer = typename
-        std::enable_if<std::is_same<SteadyTimer, asio::steady_timer>::value>::type;
+        using require_steady_timer =
+            typename std::enable_if<std::is_same<SteadyTimer, asio::steady_timer>::value>::type;
 
         template<typename POD>
         using require_pod = typename std::enable_if<std::is_pod<POD>::value>::type;
@@ -337,33 +314,29 @@ namespace eld
         {
             return std::is_same<typename std::iterator_traits<Iter>::value_type, uint8_t>() &&
                    std::is_same<typename std::iterator_traits<Iter>::iterator_category,
-                           std::random_access_iterator_tag>();
+                                std::random_access_iterator_tag>();
         }
 
         template<typename Iter>
         using require_iter = typename std::enable_if<check_random_iter<Iter>()>::type;
 
         template<typename Endpoint, typename Connection>
-        using require_endpoint = typename std::enable_if<std::is_same<Endpoint,
-                traits::endpoint_type<Connection>>::value>::type;
+        using require_endpoint = typename std::enable_if<
+            std::is_same<Endpoint, traits::endpoint_type<Connection>>::value>::type;
 
         // https://stackoverflow.com/a/51188325/9363996
         template<typename F, typename... Args>
         struct is_invocable :
-                std::is_constructible<
-                        std::function<void(Args ...)>,
-                        std::reference_wrapper<typename std::remove_reference<F>::type>
-                >
+          std::is_constructible<std::function<void(Args...)>,
+                                std::reference_wrapper<typename std::remove_reference<F>::type>>
         {
         };
 
         // https://stackoverflow.com/a/51188325/9363996
         template<typename R, typename F, typename... Args>
         struct is_invocable_r :
-                std::is_constructible<
-                        std::function<R(Args ...)>,
-                        std::reference_wrapper<typename std::remove_reference<F>::type>
-                >
+          std::is_constructible<std::function<R(Args...)>,
+                                std::reference_wrapper<typename std::remove_reference<F>::type>>
         {
         };
 
@@ -373,51 +346,49 @@ namespace eld
         };
 
         // TODO: proper implementation
-        template<typename Callable, typename ... Args>
+        template<typename Callable, typename... Args>
         struct has_signature<Callable, void(Args...)> : is_invocable<Callable, Args...>
         {
         };
 
-
         template<typename Callable, typename Signature>
-        using require_signature = typename
-        std::enable_if<has_signature<Callable, Signature>::value>::type;
+        using require_signature =
+            typename std::enable_if<has_signature<Callable, Signature>::value>::type;
 
         template<typename T, typename F>
-        using require_constructible = typename
-        std::enable_if<std::is_constructible<T, F>::value>::type;
+        using require_constructible =
+            typename std::enable_if<std::is_constructible<T, F>::value>::type;
 
         template<typename T, typename R>
         using require_same = typename std::enable_if<std::is_same<T, R>::value>::type;
 
         template<typename RandomIter>
         using require_random_iter_t = typename std::enable_if<
-                std::is_same<typename std::iterator_traits<RandomIter>::iterator_category,
-                        std::random_access_iterator_tag>::value &&
-                std::is_pod<typename std::iterator_traits<RandomIter>::value_type
-                >::value>::type;
+            std::is_same<typename std::iterator_traits<RandomIter>::iterator_category,
+                         std::random_access_iterator_tag>::value &&
+            std::is_pod<typename std::iterator_traits<RandomIter>::value_type>::value>::type;
 
     }
 
     /**
      * Helper function to create asio buffer from 2 iterators
      */
-    template<typename RandomIter,
-            typename = detail::require_random_iter_t<RandomIter>>
+    template<typename RandomIter, typename = detail::require_random_iter_t<RandomIter>>
     auto buffer(RandomIter begin, RandomIter end)
     {
         using elem_t = typename std::iterator_traits<RandomIter>::value_type;
         assert(std::distance(begin, end) >= 0 && "buffer: Invalid range!");
-        const auto *data = reinterpret_cast<const uint8_t*>(&*begin);
-        const size_t sizeInBytes = (size_t)std::distance(begin, end) *
-                (sizeof(elem_t) / sizeof(uint8_t));
+        const auto *data = reinterpret_cast<const uint8_t *>(&*begin);
+        const size_t sizeInBytes =
+            (size_t)std::distance(begin, end) * (sizeof(elem_t) / sizeof(uint8_t));
         return asio::buffer(data, sizeInBytes);
     }
 
     // TODO: move to eld::detail?
-    template<typename Connection, typename CompletionHandler,
-            typename = detail::require_signature<CompletionHandler,
-                    void(const asio::error_code &)>>
+    template<typename Connection,
+             typename CompletionHandler,
+             typename =
+                 detail::require_signature<CompletionHandler, void(const asio::error_code &)>>
     class composed_connection_attempt
     {
     public:
@@ -427,19 +398,13 @@ namespace eld
         // TODO: clarify the type!
         using completion_handler_t = CompletionHandler;
 
-        constexpr static auto default_timeout()
-        {
-            return std::chrono::milliseconds(3000);
-        }
+        constexpr static auto default_timeout() { return std::chrono::milliseconds(3000); }
 
-        constexpr static size_t infinite_attempts()
-        {
-            return size_t() - 1;
-        }
+        constexpr static size_t infinite_attempts() { return size_t() - 1; }
 
-        using executor_type = asio::associated_executor_t<
-                typename std::decay<CompletionHandler>::type,
-                typename connection_type::executor_type>;
+        using executor_type =
+            asio::associated_executor_t<typename std::decay<CompletionHandler>::type,
+                                        typename connection_type::executor_type>;
 
         executor_type get_executor() const noexcept
         {
@@ -448,8 +413,8 @@ namespace eld
         }
 
         // TODO: allocator type
-        using allocator_type = typename asio::associated_allocator_t<CompletionHandler,
-                std::allocator<void>>;
+        using allocator_type =
+            typename asio::associated_allocator_t<CompletionHandler, std::allocator<void>>;
 
         allocator_type get_allocator() const noexcept
         {
@@ -461,20 +426,20 @@ namespace eld
         template<typename CompletionHandlerT>
         explicit composed_connection_attempt(connection_type &connection,
                                              CompletionHandlerT &&completionHandler)
-                : pImpl_(std::make_shared<impl>(connection,
-                                                std::forward<CompletionHandlerT>(completionHandler)))
-        {}
+          : pImpl_(std::make_shared<impl>(connection,
+                                          std::forward<CompletionHandlerT>(completionHandler)))
+        {
+        }
 
-
-        template<typename CompletionHandlerT,
-                typename Callable>
+        template<typename CompletionHandlerT, typename Callable>
         explicit composed_connection_attempt(connection_type &connection,
                                              CompletionHandlerT &&completionHandler,
                                              Callable &&stopOnError)
-                : pImpl_(std::make_shared<impl>(connection,
-                                                std::forward<CompletionHandlerT>(completionHandler),
-                                                std::forward<Callable>(stopOnError)))
-        {}
+          : pImpl_(std::make_shared<impl>(connection,
+                                          std::forward<CompletionHandlerT>(completionHandler),
+                                          std::forward<Callable>(stopOnError)))
+        {
+        }
 
         /**
          * Initiation operator. Initiates composed connection procedure.
@@ -498,7 +463,8 @@ namespace eld
         }
 
         /**
-         * Initiation operator. Initiates composed connection procedure. Connection attempts default to infinite.
+         * Initiation operator. Initiates composed connection procedure. Connection attempts default
+         * to infinite.
          * @tparam Endpoint type of endpoint
          * @tparam Duration type of timeout
          * @param endpoint endpoint to be used for connection
@@ -506,8 +472,7 @@ namespace eld
          */
         // TODO: require endpoint type
         template<typename Endpoint, typename Duration>
-        void operator()(Endpoint &&endpoint,
-                        Duration &&timeout = default_timeout())
+        void operator()(Endpoint &&endpoint, Duration &&timeout = default_timeout())
         {
             pImpl_->endpoint_ = std::forward<Endpoint>(endpoint);
             pImpl_->timeout_ = std::forward<Duration>(timeout);
@@ -519,8 +484,8 @@ namespace eld
          * Intermediate completion handler. Will be trying to connect until:<br>
          * - has connected<br>
          * - has run out of attempts<br>
-         * - user-provided callback #impl::stopOnError_ interrupts execution when a specific connection error has occurred<br>
-         * <br>Will be invoked only on connection events:<br>
+         * - user-provided callback #impl::stopOnError_ interrupts execution when a specific
+         * connection error has occurred<br> <br>Will be invoked only on connection events:<br>
          * - success<br>
          * - connection timeout or operation_cancelled in case if timer has expired<br>
          * - connection errors<br>
@@ -536,21 +501,25 @@ namespace eld
             }
 
             const auto attemptsLeft = pImpl_->attempts_ == infinite_attempts() ?
-                                      infinite_attempts() :
-                                      pImpl_->attempts_ - 1;
+                                          infinite_attempts() :
+                                          pImpl_->attempts_ - 1;
+
+            bool equalCode = errorCode.value() == asio::error::operation_aborted;
+            bool equalError = errorCode == asio::error::operation_aborted;
 
             if ((pImpl_->stopOnError_ &&
                  pImpl_->stopOnError_(errorCode == asio::error::operation_aborted ?
-                                      // special case for operation_aborted on timer expiration - need to send timed_out explicitly
-                                      // this should only be resulted from the timer calling cancel()
-                                      asio::error::timed_out :
-                                      errorCode)) ||
+                                          // special case for operation_aborted on timer expiration
+                                          // - need to send timed_out explicitly this should only be
+                                          // resulted from the timer calling cancel()
+                                          asio::error::timed_out :
+                                          errorCode)) ||
                 !attemptsLeft)
             {
                 stopTimer();
                 pImpl_->completionHandler_(errorCode == asio::error::operation_aborted ?
-                                           asio::error::timed_out :
-                                           errorCode);
+                                               asio::error::timed_out :
+                                               errorCode);
                 return;
             }
 
@@ -559,24 +528,24 @@ namespace eld
         }
 
     private:
-
         struct impl
         {
             template<typename CompletionHandlerT>
-            impl(connection_type &connection,
-                 CompletionHandlerT &&completionHandler)
-                    : connection_(connection),
-                      completionHandler_(std::forward<CompletionHandlerT>(completionHandler))
-            {}
+            impl(connection_type &connection, CompletionHandlerT &&completionHandler)
+              : connection_(connection),
+                completionHandler_(std::forward<CompletionHandlerT>(completionHandler))
+            {
+            }
 
             template<typename CompletionHandlerT, typename Callable>
             impl(connection_type &connection,
                  CompletionHandlerT &&completionHandler,
                  Callable &&stopOnError)
-                    : connection_(connection),
-                      completionHandler_(std::forward<CompletionHandlerT>(completionHandler)),
-                      stopOnError_(std::forward<Callable>(stopOnError))
-            {}
+              : connection_(connection),
+                completionHandler_(std::forward<CompletionHandlerT>(completionHandler)),
+                stopOnError_(std::forward<Callable>(stopOnError))
+            {
+            }
 
             executor_type get_executor() const noexcept
             {
@@ -598,7 +567,9 @@ namespace eld
             endpoint_type endpoint_;
 
             // TODO: make timer initialization from get_executor()
-            asio::steady_timer timer_{connection_.get_executor()}; // this does not compile! -> {get_executor()};
+            asio::steady_timer timer_{
+                connection_.get_executor()
+            };   // this does not compile! -> {get_executor()};
             asio::steady_timer::duration timeout_ = default_timeout();
             size_t attempts_ = infinite_attempts();
         };
@@ -609,26 +580,24 @@ namespace eld
         // cancels the connection on timeout!
         void startTimer()
         {
-            pImpl_->timer_.expires_after(pImpl_->timeout_); // it will automatically cancel a pending timer
+            pImpl_->timer_.expires_after(
+                pImpl_->timeout_);   // it will automatically cancel a pending timer
             pImpl_->timer_.async_wait(
-                    [pImpl = pImpl_](const asio::error_code &errorCode)
-                    {
-                        // will occur on connection error before timeout
-                        if (errorCode == asio::error::operation_aborted)
-                            return;
+                [pImpl = pImpl_](const asio::error_code &errorCode)
+                {
+                    // will occur on connection error before timeout
+                    if (errorCode == asio::error::operation_aborted)
+                        return;
 
-                        // TODO: handle timer errors? What are the possible errors?
-                        assert(!errorCode && "unexpected timer error!");
+                    // TODO: handle timer errors? What are the possible errors?
+                    assert(!errorCode && "unexpected timer error!");
 
-                        // stop attempts
-                        pImpl->connection_.cancel();
-                    });
+                    // stop attempts
+                    pImpl->connection_.cancel();
+                });
         }
 
-        void stopTimer()
-        {
-            pImpl_->timer_.cancel();
-        }
+        void stopTimer() { pImpl_->timer_.cancel(); }
 
         /**
          * Will be trying to connect until:<br>
@@ -646,26 +615,24 @@ namespace eld
         }
     };
 
-    template<typename Connection,
-            typename CompletionHandler,
-            typename Callable>
+    template<typename Connection, typename CompletionHandler, typename Callable>
     auto make_composed_connection_attempt(Connection &connection,
                                           CompletionHandler &&completionHandler,
-                                          Callable &&stopOnError) ->
-    composed_connection_attempt<Connection, CompletionHandler>
+                                          Callable &&stopOnError)
+        -> composed_connection_attempt<Connection, CompletionHandler>
     {
-        return composed_connection_attempt<Connection, CompletionHandler>(connection,
-                                                                          std::forward<CompletionHandler>(
-                                                                                  completionHandler),
-                                                                          std::forward<Callable>(stopOnError));
+        return composed_connection_attempt<Connection, CompletionHandler>(
+            connection,
+            std::forward<CompletionHandler>(completionHandler),
+            std::forward<Callable>(stopOnError));
     }
 
     // TODO: specification for this function
     template<typename Connection,
-            typename Endpoint,
-            typename Duration,
-            typename CompletionToken,
-            typename Callable>
+             typename Endpoint,
+             typename Duration,
+             typename CompletionToken,
+             typename Callable>
     auto async_connection_attempt(Connection &connection,
                                   Endpoint &&endpoint,
                                   size_t attempts,
@@ -673,16 +640,16 @@ namespace eld
                                   CompletionToken &&completionToken,
                                   Callable &&stopOnError)
     {
-        using result_t = asio::async_result<std::decay_t<CompletionToken>,
-                void(asio::error_code)>;
+        using result_t = asio::async_result<std::decay_t<CompletionToken>, void(asio::error_code)>;
         using completion_t = typename result_t::completion_handler_type;
 
-        completion_t completion{std::forward<CompletionToken>(completionToken)};
-        result_t result{completion};
+        completion_t completion{ std::forward<CompletionToken>(completionToken) };
+        result_t result{ completion };
 
-        auto composedConnectionAttempt = make_composed_connection_attempt(connection,
-                                                                          std::forward<completion_t>(completion),
-                                                                          std::forward<Callable>(stopOnError));
+        auto composedConnectionAttempt =
+            make_composed_connection_attempt(connection,
+                                             std::forward<completion_t>(completion),
+                                             std::forward<Callable>(stopOnError));
         composedConnectionAttempt(std::forward<Endpoint>(endpoint),
                                   attempts,
                                   std::forward<Duration>(timeout));
@@ -691,37 +658,36 @@ namespace eld
     }
 
     template<typename Connection,
-            typename Endpoint,
-            typename Duration,
-            typename CompletionToken,
-            typename Callable>
+             typename Endpoint,
+             typename Duration,
+             typename CompletionToken,
+             typename Callable>
     auto async_connection_attempt(Connection &connection,
                                   Endpoint &&endpoint,
                                   Duration &&timeout,
                                   CompletionToken &&completionToken,
                                   Callable &&stopOnError)
     {
-
-        using result_t = asio::async_result<std::decay_t<CompletionToken>,
-                void(asio::error_code)>;
+        using result_t = asio::async_result<std::decay_t<CompletionToken>, void(asio::error_code)>;
         using completion_t = typename result_t::completion_handler_type;
 
-        completion_t completion{std::forward<CompletionToken>(completionToken)};
-        result_t result{completion};
+        completion_t completion{ std::forward<CompletionToken>(completionToken) };
+        result_t result{ completion };
 
-        auto composedConnectionAttempt = make_composed_connection_attempt(connection,
-                                                                          std::forward<completion_t>(completion),
-                                                                          std::forward<Callable>(stopOnError));
+        auto composedConnectionAttempt =
+            make_composed_connection_attempt(connection,
+                                             std::forward<completion_t>(completion),
+                                             std::forward<Callable>(stopOnError));
         composedConnectionAttempt(std::forward<Endpoint>(endpoint),
                                   std::forward<Duration>(timeout));
 
         return result.get();
     }
 
-
     /**
-     * Class for a persistent asynchronous queue to send data via series of composed asio::async_write operations.<br>
-     * The object uses connections executor. Only one queue is allowed per connection.
+     * Class for a persistent asynchronous queue to send data via series of composed
+     * asio::async_write operations.<br> The object uses connections executor. Only one queue is
+     * allowed per connection.
      * @tparam Connection type for a connection to be used to asynchronously send data.
      * @tparam CompletionHandler handler to be invoked upon events:<br>
      * - operation aborted (as a result of external invocation of connection.cancel() method)
@@ -739,50 +705,51 @@ namespace eld
         using send_completion_signature_t = void(const asio::error_code &, size_t);
 
         using send_completion_handler_t = std::function<send_completion_signature_t>;
-        using send_command_t = std::pair<asio::const_buffer,
-                send_completion_handler_t>;
+        using send_command_t = std::pair<asio::const_buffer, send_completion_handler_t>;
 
         using executor_type = typename connection_t::executor_type;
 
-        executor_type get_executor()
-        {
-            return pSharedState_->connection_.get_executor();
-        }
+        executor_type get_executor() { return pSharedState_->connection_.get_executor(); }
 
         /**
          * Constructor. Initializes shared state.
          * @tparam CompletionHandlerT type for a final completion handler
          * @param connection connection to be used to send data
-         * @param completionHandler final completion handler. Will be invoked either upon unrecoverable error
-         * or upon user's request to stop.
+         * @param completionHandler final completion handler. Will be invoked either upon
+         * unrecoverable error or upon user's request to stop.
          */
         template<typename CompletionHandlerT,
-                typename = detail::require_constructible<final_completion_t, CompletionHandlerT>>
-        async_send_queue(connection_t &connection,
-                         CompletionHandlerT &&completionHandler)
-                : pSharedState_(std::make_shared<impl>(connection,
-                                                       std::forward<CompletionHandlerT>(completionHandler)))
-        {}
+                 typename = detail::require_constructible<final_completion_t, CompletionHandlerT>>
+        async_send_queue(connection_t &connection, CompletionHandlerT &&completionHandler)
+          : pSharedState_(
+                std::make_shared<impl>(connection,
+                                       std::forward<CompletionHandlerT>(completionHandler)))
+        {
+        }
 
         /**
          * Constructor. Initializes shared state.
          * @tparam CompletionHandlerT type for a final completion handler
          * @tparam Callable type for a user-supplied callable object stopOnError
          * @param connection connection connection to be used to send data
-         * @param completionHandler final completion handler. Will be invoked either upon unrecoverable error
-         * or upon user's request to stop.
+         * @param completionHandler final completion handler. Will be invoked either upon
+         * unrecoverable error or upon user's request to stop.
          * @param stopOnError user-provided callable to request stop on error.
          */
-        template<typename CompletionHandlerT, typename Callable,
-                typename = detail::require_constructible<final_completion_t, CompletionHandlerT>,
-                typename = detail::require_constructible<std::function<stop_on_error_signature_t>, Callable>>
+        template<typename CompletionHandlerT,
+                 typename Callable,
+                 typename = detail::require_constructible<final_completion_t, CompletionHandlerT>,
+                 typename = detail::require_constructible<std::function<stop_on_error_signature_t>,
+                                                          Callable>>
         async_send_queue(connection_t &connection,
                          CompletionHandlerT &&completionHandler,
                          Callable &&stopOnError)
-                : pSharedState_(std::make_shared<impl>(connection,
-                                                       std::forward<CompletionHandlerT>(completionHandler),
-                                                       std::forward<Callable>(stopOnError)))
-        {}
+          : pSharedState_(
+                std::make_shared<impl>(connection,
+                                       std::forward<CompletionHandlerT>(completionHandler),
+                                       std::forward<Callable>(stopOnError)))
+        {
+        }
 
         /**
          * Move constructor is not allowed.
@@ -800,10 +767,11 @@ namespace eld
          * If no data is pending for sending, will send immediately and start the loop
          * until all the data has been sent. Otherwise will enqueue.
          * @tparam ConstBuffer type for a const buffer which contains data to be sent.
-         * @tparam CompletionToken type for a completion token. Can be a simple callback or custom tokens like
-         * asio::use_future.
+         * @tparam CompletionToken type for a completion token. Can be a simple callback or custom
+         * tokens like asio::use_future.
          * @param buffer buffer that holds the data to be sent.
-         * Caller is responsible to maintain the buffer's validity until the send command has been completed.
+         * Caller is responsible to maintain the buffer's validity until the send command has been
+         * completed.
          * @param token completion token. Will be used to initialize completion handler.
          * Will be invoked when the asio::async_write call is finished.
          * @return Deduced from CompletionToken type result.
@@ -813,28 +781,24 @@ namespace eld
         {
             assert(pSharedState_ && "Invalid async_send_queue: pSharedState_ is nullptr!");
 
-            using result_t = asio::async_result<std::decay_t<CompletionToken>,
-                    send_completion_signature_t>;
+            using result_t =
+                asio::async_result<std::decay_t<CompletionToken>, send_completion_signature_t>;
             using completion_t = typename result_t::completion_handler_type;
 
-            completion_t completion{std::forward<CompletionToken>(token)};
-            result_t result{completion};
+            completion_t completion{ std::forward<CompletionToken>(token) };
+            result_t result{ completion };
 
             // TODO: check if executor is provided and bind?
-            auto onSentHandler =
-                    [completion = std::move(completion)](const asio::error_code &errorCode,
-                                                         size_t bytesSent)
-                    {
-                        completion(errorCode, bytesSent);
-                    };
+            auto onSentHandler = [completion = std::move(completion)](
+                                     const asio::error_code &errorCode,
+                                     size_t bytesSent) { completion(errorCode, bytesSent); };
 
-            std::lock_guard<std::mutex> lockGuard{pSharedState_->mutex_};
-            if (pSharedState_->commands_.empty() &&
-                !pSharedState_->running_)
+            std::lock_guard<std::mutex> lockGuard{ pSharedState_->mutex_ };
+            if (pSharedState_->commands_.empty() && !pSharedState_->running_)
             {
                 pSharedState_->running_ = true;
-                asyncSend(send_command_t(std::forward<ConstBuffer>(buffer),
-                                         std::move(onSentHandler)));
+                asyncSend(
+                    send_command_t(std::forward<ConstBuffer>(buffer), std::move(onSentHandler)));
                 return result.get();
             }
 
@@ -844,7 +808,6 @@ namespace eld
         }
 
     private:
-
         struct impl
         {
             connection_t &connection_;
@@ -853,32 +816,31 @@ namespace eld
 
             template<typename CompletionHandlerT>
             impl(connection_t &connection, CompletionHandlerT &&handler)
-                    : connection_(connection),
-                      finalCompletion_(std::forward<CompletionHandlerT>(handler))
-            {}
+              : connection_(connection),
+                finalCompletion_(std::forward<CompletionHandlerT>(handler))
+            {
+            }
 
             template<typename CompletionHandlerT, typename Callable>
-            impl(connection_t &connection,
-                 CompletionHandlerT &&handler,
-                 Callable &&stopOnError)
-                    : connection_(connection),
-                      finalCompletion_(std::forward<CompletionHandlerT>(handler)),
-                      stopOnError_(std::forward<Callable>(stopOnError))
-            {}
-
+            impl(connection_t &connection, CompletionHandlerT &&handler, Callable &&stopOnError)
+              : connection_(connection),
+                finalCompletion_(std::forward<CompletionHandlerT>(handler)),
+                stopOnError_(std::forward<Callable>(stopOnError))
+            {
+            }
 
             std::queue<send_command_t> commands_;
             std::mutex mutex_;
 
             // TODO: get rid of running?
-            std::atomic_bool running_{false};
+            std::atomic_bool running_{ false };
         };
 
         std::shared_ptr<impl> pSharedState_;
 
         void lockStop()
         {
-            std::lock_guard<std::mutex> lockGuard{pSharedState_->mutex_};
+            std::lock_guard<std::mutex> lockGuard{ pSharedState_->mutex_ };
             pSharedState_->running_ = false;
         }
 
@@ -888,64 +850,66 @@ namespace eld
             asio::const_buffer &buffer = command.first;
 
             // TODO: use operator() of this to handle result
-            asio::async_write(pSharedState_->connection_, buffer,
-                              [this, command =
-                              std::move(command.second)](const asio::error_code &errorCode,
-                                                         size_t bytesSent)
-                              {
-                                  // notify user about the completion of single composed operation
-                                  command(errorCode, bytesSent);
+            asio::async_write(
+                pSharedState_->connection_,
+                buffer,
+                [this, command = std::move(command.second)](const asio::error_code &errorCode,
+                                                            size_t bytesSent)
+                {
+                    // notify user about the completion of single composed operation
+                    command(errorCode, bytesSent);
 
-                                  // stop case, ignoring user's opinion whether he wants to proceed
-                                  if (errorCode == asio::error::operation_aborted)
-                                  {
-                                      if (pSharedState_->stopOnError_)
-                                          pSharedState_->stopOnError_(errorCode, bytesSent);
-                                      lockStop();
-                                      pSharedState_->finalCompletion_(errorCode);
-                                      return;
-                                  }
+                    // stop case, ignoring user's opinion whether he wants to proceed
+                    if (errorCode == asio::error::operation_aborted)
+                    {
+                        if (pSharedState_->stopOnError_)
+                            pSharedState_->stopOnError_(errorCode, bytesSent);
+                        lockStop();
+                        pSharedState_->finalCompletion_(errorCode);
+                        return;
+                    }
 
-                                  // stop requested by user
-                                  if (pSharedState_->stopOnError_ && pSharedState_->stopOnError_(errorCode, bytesSent))
-                                  {
-                                      lockStop();
-                                      // TODO: special error code?
-                                      pSharedState_->finalCompletion_(asio::error::operation_aborted);
-                                      return;
-                                  }
+                    // stop requested by user
+                    if (pSharedState_->stopOnError_ &&
+                        pSharedState_->stopOnError_(errorCode, bytesSent))
+                    {
+                        lockStop();
+                        // TODO: special error code?
+                        pSharedState_->finalCompletion_(asio::error::operation_aborted);
+                        return;
+                    }
 
-                                  // TODO: other errors? continue if connection was lost?
-                                  if (!errorCode)
-                                  {
-                                      std::lock_guard<std::mutex> lockGuard{pSharedState_->mutex_};
-                                      if (pSharedState_->commands_.empty())
-                                      {
-                                          pSharedState_->running_ = false;
-                                          return;
-                                      }
+                    // TODO: other errors? continue if connection was lost?
+                    if (!errorCode)
+                    {
+                        std::lock_guard<std::mutex> lockGuard{ pSharedState_->mutex_ };
+                        if (pSharedState_->commands_.empty())
+                        {
+                            pSharedState_->running_ = false;
+                            return;
+                        }
 
-                                      send_command_t dispatchedCommand = std::move(pSharedState_->commands_.front());
-                                      pSharedState_->commands_.pop();
+                        send_command_t dispatchedCommand =
+                            std::move(pSharedState_->commands_.front());
+                        pSharedState_->commands_.pop();
 
-                                      // TODO: use dispatch?
-                                      asio::dispatch(get_executor(), [this,
-                                              dispatchedCommand = std::move(dispatchedCommand)]() mutable
-                                      {
-                                          asyncSend(std::move(dispatchedCommand));
-                                      });
+                        // TODO: use dispatch?
+                        asio::dispatch(
+                            get_executor(),
+                            [this, dispatchedCommand = std::move(dispatchedCommand)]() mutable
+                            { asyncSend(std::move(dispatchedCommand)); });
 
-                                      // old code without using dispatch
-                                      // asyncSend(std::move(pSharedState_->commands_.front()));
-                                      // pSharedState_->commands_.pop();
-                                      return;
-                                  }
+                        // old code without using dispatch
+                        // asyncSend(std::move(pSharedState_->commands_.front()));
+                        // pSharedState_->commands_.pop();
+                        return;
+                    }
 
-                                  // unrecoverable error case
-                                  lockStop();
-                                  pSharedState_->finalCompletion_(errorCode);
-                                  return;
-                              });
+                    // unrecoverable error case
+                    lockStop();
+                    pSharedState_->finalCompletion_(errorCode);
+                    return;
+                });
         }
     };
 
@@ -960,14 +924,14 @@ namespace eld
         template<typename T, typename R>
         constexpr auto get_combined(T &&t, R &&r, std::false_type)
         {
-            return std::make_tuple(std::forward<T>(t),
-                                   std::forward<R>(r));
+            return std::make_tuple(std::forward<T>(t), std::forward<R>(r));
         }
 
         template<typename T, typename R>
         constexpr auto get_combined(T &&t, R &&r)
         {
-            return get_combined(std::forward<T>(t), std::forward<R>(r),
+            return get_combined(std::forward<T>(t),
+                                std::forward<R>(r),
                                 std::is_void<decltype(std::declval<R>().get())>());
         }
     }
@@ -976,16 +940,15 @@ namespace eld
     template<typename Connection, typename CompletionToken>
     auto make_async_send_queue(Connection &connection, CompletionToken &&finalToken)
     {
-        using result_t = asio::async_result<std::decay_t<CompletionToken>,
-                void(asio::error_code)>;
+        using result_t = asio::async_result<std::decay_t<CompletionToken>, void(asio::error_code)>;
         using completion_t = typename result_t::completion_handler_type;
 
-        completion_t completion{std::forward<CompletionToken>(finalToken)};
-        result_t result{completion};
+        completion_t completion{ std::forward<CompletionToken>(finalToken) };
+        result_t result{ completion };
 
-        return detail::get_combined(async_send_queue<Connection, completion_t>(connection,
-                                                                               std::move(completion)),
-                                    std::move(result));
+        return detail::get_combined(
+            async_send_queue<Connection, completion_t>(connection, std::move(completion)),
+            std::move(result));
     }
 
     template<typename T>

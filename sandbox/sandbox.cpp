@@ -43,5 +43,21 @@ int main()
     // TODO: abort connection
     // TODO: connection time out
 
+    struct StubConnectionA
+    {
+        using config_type = double;
+        void cancel(){}
+
+    };
+
+    struct StubConnectionB
+    {
+        using config_type = double;
+        void cancel(){}
+
+    };
+
+    auto adapter = eld::make_connection_adapter(StubConnectionA(), StubConnectionB());
+
     return 0;
 }

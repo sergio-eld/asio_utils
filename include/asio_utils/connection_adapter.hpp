@@ -86,10 +86,11 @@ namespace eld
         // TODO: hide?
         connection_adapter_basic(connection_adapter_basic &&) = default;
 
-        template<typename ConTA, typename ConTB>
-        connection_adapter_basic(ConTA &&connectionA, ConTB &&connectionB)
+        template<typename ConTA, typename ConTB, typename... ImplArgsT>
+        connection_adapter_basic(ConTA &&connectionA, ConTB &&connectionB, ImplArgsT &&...implArgs)
           : pImpl_(std::make_unique<state>(std::forward<ConTA>(connectionA),
-                                           std::forward<ConTB>(connectionB)))
+                                           std::forward<ConTB>(connectionB))),
+            impl_(std::forward<ImplArgsT>(implArgs)...)
         {
         }
 
@@ -118,8 +119,8 @@ namespace eld
             const auto configTo = std::forward<ConfigTB>(a_configTo);
             const auto &configToCurrent = implementation_type::get_config(connectionTo);
 
-            const bool equalConfigsFrom = impl::compare_configs(configFrom, configFromCurrent),
-                       equalConfigsTo = impl::compare_configs(configTo, configToCurrent);
+            const bool equalConfigsFrom = impl_.compare_configs(configFrom, configFromCurrent),
+                       equalConfigsTo = impl_.compare_configs(configTo, configToCurrent);
 
             if (currentState != connection_state::idle &&   //
                 equalConfigsFrom &&                         //
@@ -132,10 +133,10 @@ namespace eld
             stop_active_connection(DirectionTag());
 
             if (!equalConfigsFrom)
-                impl::configure(connectionFrom, configFrom);
+                impl_.configure(connectionFrom, configFrom);
 
             if (!equalConfigsTo)
-                impl::configure(connectionTo, configTo);
+                impl_.configure(connectionTo, configTo);
 
             currentState = connection_state::reading;
             async_receive(DirectionTag());
@@ -189,15 +190,15 @@ namespace eld
             auto &destination = get_destination_connection(DirectionTag());
 
             if (state_ == connection_state::reading)
-                impl::cancel(source);
+                impl_.cancel(source);
             else
-                impl::cancel(destination);
+                impl_.cancel(destination);
         }
 
         template<typename DirectionTag>
         void async_receive(DirectionTag)
         {
-            impl::async_receive(get_connection(DirectionTag()),
+            impl_.async_receive(get_connection(DirectionTag()),
                                 asio::buffer(get_buffer(DirectionTag())),
                                 [this](const error_type &errorCode, size_t bytesRead)
                                 {
@@ -214,7 +215,7 @@ namespace eld
         template<typename DirectionTag>
         void async_send(size_t bytesReceived, DirectionTag)
         {
-            impl::async_send(get_connection(tag::detail::reverse_adapter_tag<DirectionTag>()),
+            impl_.async_send(get_connection(tag::detail::reverse_adapter_tag<DirectionTag>()),
                              asio::buffer(get_buffer(DirectionTag()).data(), bytesReceived),
                              [this](const error_type &errorCode, size_t bytesSent)
                              {
@@ -247,9 +248,9 @@ namespace eld
                    "Unexpected connection state");
 
             if (get_state(DirectionTag()) == connection_state::reading ?
-                    impl::remote_host_has_disconnected(get_source_connection(DirectionTag()),
+                    impl_.remote_host_has_disconnected(get_source_connection(DirectionTag()),
                                                        errorCode) :
-                    impl::remote_host_has_disconnected(get_destination_connection(DirectionTag()),
+                    impl_.remote_host_has_disconnected(get_destination_connection(DirectionTag()),
                                                        errorCode))
             {
                 get_state(DirectionTag()) = connection_state::idle;
@@ -317,6 +318,7 @@ namespace eld
         };
 
         std::unique_ptr<state> pImpl_;
+        implementation_type impl_;
     };
 
     template<typename ConnectionTA, typename ConnectionTB, typename AdapterConfig>
@@ -336,9 +338,7 @@ namespace eld
     connection_adapter_basic<ConnectionTA, ConnectionTB, custom::connection_asio_impl>
         make_connection_adapter(ConnectionTA &&connectionL, ConnectionTB &&connectionR)
     {
-        return connection_adapter_basic<ConnectionTA,
-                                        ConnectionTB,
-                                        custom::connection_asio_impl>(
+        return connection_adapter_basic<ConnectionTA, ConnectionTB, custom::connection_asio_impl>(
             std::forward<ConnectionTA>(connectionL),
             std::forward<ConnectionTB>(connectionR));
     }

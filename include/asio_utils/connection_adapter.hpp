@@ -53,21 +53,32 @@ namespace eld
 
     }
 
-    template<typename ConnectionTA, typename ConnectionTB, typename AdapterConfigT>
+    /**
+     * Algorithm creates bridge between 2 connection points.
+     * @tparam ConnectionTA
+     * @tparam ConnectionTB
+     * @tparam ImplT
+     */
+    template<typename ConnectionTA, typename ConnectionTB, typename ImplT>
     class connection_adapter_basic
     {
     public:
         using connection_type_a = ConnectionTA;
         using connection_type_b = ConnectionTB;
-        using adapter_config_type = AdapterConfigT;
+        using implementation_type = ImplT;
 
+    private:
+        using error_type = typename implementation_type::error_type;
+        using impl = implementation_type;
+
+    public:
         using config_type_a = typename traits::connection<connection_type_a>::config_type;
         using config_type_b = typename traits::connection<connection_type_b>::config_type;
 
         template<typename = typename std::enable_if<util::conjunction<
                      std::is_default_constructible<connection_type_a>,
                      std::is_default_constructible<connection_type_b>,
-                     std::is_default_constructible<adapter_config_type>>::value>::type>
+                     std::is_default_constructible<implementation_type>>::value>::type>
         constexpr connection_adapter_basic()
         {
         }
@@ -82,17 +93,14 @@ namespace eld
         {
         }
 
-        template<typename ConfigTA,
-                 typename ConfigTB,
-                 typename CompletionT,
-                 typename DirectionTag>
+        template<typename ConfigTA, typename ConfigTB, typename CompletionT, typename DirectionTag>
         auto async_run(ConfigTA &&a_configFrom,
                        ConfigTB &&a_configTo,
                        DirectionTag,
                        CompletionT &&completionToken)
         {
             using result_t =
-                asio::async_result<std::decay_t<CompletionT>, void(const asio::error_code &)>;
+                asio::async_result<std::decay_t<CompletionT>, void(const error_type &)>;
             using completion_t = typename result_t::completion_handler_type;
 
             completion_t completion{ std::forward<CompletionT>(completionToken) };
@@ -103,31 +111,31 @@ namespace eld
 
             auto &connectionFrom = get_connection(DirectionTag());
             const auto configFrom = std::forward<ConfigTA>(a_configFrom);
-            const auto &configFromCurrent = custom::get_config(connectionFrom);
+            const auto &configFromCurrent = implementation_type::get_config(connectionFrom);
 
             auto &connectionTo =
                 get_connection(typename tag::detail::reverse_adapter_tag<DirectionTag>::type());
             const auto configTo = std::forward<ConfigTB>(a_configTo);
-            const auto &configToCurrent = custom::get_config(connectionTo);
+            const auto &configToCurrent = implementation_type::get_config(connectionTo);
 
-            const bool equalConfigsFrom = custom::compare_configs(configFrom, configFromCurrent),
-                       equalConfigsTo = custom::compare_configs(configTo, configToCurrent);
+            const bool equalConfigsFrom = impl::compare_configs(configFrom, configFromCurrent),
+                       equalConfigsTo = impl::compare_configs(configTo, configToCurrent);
 
             if (currentState != connection_state::idle &&   //
                 equalConfigsFrom &&                         //
                 equalConfigsTo)
             {
-                completion(asio::error::already_started);
+                completion(impl::error::already_started());
                 return result.get();
             }
 
             stop_active_connection(DirectionTag());
 
             if (!equalConfigsFrom)
-                custom::configure(connectionFrom, configFrom);
+                impl::configure(connectionFrom, configFrom);
 
             if (!equalConfigsTo)
-                custom::configure(connectionTo, configTo);
+                impl::configure(connectionTo, configTo);
 
             currentState = connection_state::reading;
             async_receive(DirectionTag());
@@ -152,7 +160,6 @@ namespace eld
         enum class connection_state
         {
             idle,
-            running,   // TODO: remove running
             reading,
             writing
         };
@@ -169,9 +176,6 @@ namespace eld
         auto &get_destination_connection(tag::adapter_a_to_b) { return pImpl_->connectionB_; }
         auto &get_destination_connection(tag::adapter_b_to_a) { return pImpl_->connectionA_; }
 
-        //        auto &get_connection(tag::adapter_a_to_b) { return pImpl_->connectionA_; }
-        //        auto &get_connection(tag::adapter_b_to_a) { return pImpl_->connectionB_; }
-
         auto &get_buffer(tag::adapter_a_to_b) { return pImpl_->buffer_a_to_b_; }
         auto &get_buffer(tag::adapter_b_to_a) { return pImpl_->buffer_b_to_a_; }
 
@@ -185,55 +189,55 @@ namespace eld
             auto &destination = get_destination_connection(DirectionTag());
 
             if (state_ == connection_state::reading)
-                custom::cancel(source);
+                impl::cancel(source);
             else
-                custom::cancel(destination);
+                impl::cancel(destination);
         }
 
         template<typename DirectionTag>
         void async_receive(DirectionTag)
         {
-            custom::async_receive(get_connection(DirectionTag()),
-                                  asio::buffer(get_buffer(DirectionTag())),
-                                  [this](const asio::error_code &errorCode, size_t bytesRead)
-                                  {
-                                      std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
+            impl::async_receive(get_connection(DirectionTag()),
+                                asio::buffer(get_buffer(DirectionTag())),
+                                [this](const error_type &errorCode, size_t bytesRead)
+                                {
+                                    std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
 
-                                      if (!handle_error(errorCode), DirectionTag())
-                                          return;
+                                    if (!handle_error(errorCode), DirectionTag())
+                                        return;
 
-                                      get_state(DirectionTag()) = connection_state::writing;
-                                      async_send(bytesRead, DirectionTag());
-                                  });
+                                    get_state(DirectionTag()) = connection_state::writing;
+                                    async_send(bytesRead, DirectionTag());
+                                });
         }
 
         template<typename DirectionTag>
         void async_send(size_t bytesReceived, DirectionTag)
         {
-            custom::async_send(get_connection(tag::detail::reverse_adapter_tag<DirectionTag>()),
-                               asio::buffer(get_buffer(DirectionTag()).data(), bytesReceived),
-                               [this](const asio::error_code &errorCode, size_t bytesSent)
-                               {
-                                   std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
+            impl::async_send(get_connection(tag::detail::reverse_adapter_tag<DirectionTag>()),
+                             asio::buffer(get_buffer(DirectionTag()).data(), bytesReceived),
+                             [this](const error_type &errorCode, size_t bytesSent)
+                             {
+                                 std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
 
-                                   if (!handle_error(errorCode), DirectionTag())
-                                       return;
+                                 if (!handle_error(errorCode), DirectionTag())
+                                     return;
 
-                                   get_state(DirectionTag()) = connection_state::reading;
-                                   async_receive(DirectionTag());
-                               });
+                                 get_state(DirectionTag()) = connection_state::reading;
+                                 async_receive(DirectionTag());
+                             });
         }
 
         template<typename DirectionTag>
-        bool handle_error(const asio::error_code &errorCode, DirectionTag)
+        bool handle_error(const error_type &errorCode, DirectionTag)
         {
-            if (errorCode == asio::error::operation_aborted)
+            if (errorCode == impl::error::operation_aborted())
             {
                 get_state(DirectionTag()) = connection_state::idle;
 
                 assert(pImpl_->completion_handler_ &&
                        "Completion handler is expected to be in valid state!");
-                pImpl_->completion_handler_(asio::error_code());
+                pImpl_->completion_handler_(error_type());
                 pImpl_->completion_handler_ = {};
 
                 return false;
@@ -243,10 +247,10 @@ namespace eld
                    "Unexpected connection state");
 
             if (get_state(DirectionTag()) == connection_state::reading ?
-                    custom::remote_host_has_disconnected(get_source_connection(DirectionTag()),
-                                                         errorCode) :
-                    custom::remote_host_has_disconnected(get_destination_connection(DirectionTag()),
-                                                         errorCode))
+                    impl::remote_host_has_disconnected(get_source_connection(DirectionTag()),
+                                                       errorCode) :
+                    impl::remote_host_has_disconnected(get_destination_connection(DirectionTag()),
+                                                       errorCode))
             {
                 get_state(DirectionTag()) = connection_state::idle;
 
@@ -277,7 +281,7 @@ namespace eld
 
             pImpl_->completion_handler_ =
                 [completionHandler = std::move(pImpl_->completion_handler_),
-                 sharedPromise](const asio::error_code &errorCode) mutable
+                 sharedPromise](const error_type &errorCode) mutable
             {
                 sharedPromise->set_value();
                 completionHandler(errorCode);
@@ -301,7 +305,7 @@ namespace eld
             connection_type_a connectionA_;
             connection_type_b connectionB_;
 
-            typename adapter_config_type::buffer_type buffer_a_to_b_,   //
+            typename implementation_type::buffer_type buffer_a_to_b_,   //
                 buffer_b_to_a_;
 
             std::atomic<connection_state> state_a_to_b_{ connection_state::idle },   //
@@ -309,7 +313,7 @@ namespace eld
             std::mutex mutex_a_to_b_,   //
                 mutex_b_to_a_;
 
-            std::function<void(const asio::error_code &)> completion_handler_;
+            std::function<void(const error_type &)> completion_handler_;
         };
 
         std::unique_ptr<state> pImpl_;
@@ -326,20 +330,15 @@ namespace eld
             std::forward<ConnectionTB>(connectionR));
     }
 
-    // TODO: move customization to another header
-    namespace custom
-    {
-        struct default_adapter_config
-        {
-            using buffer_type = std::array<uint8_t, 2048>;
-        };
-    }
+    // TODO: move customization
 
     template<typename ConnectionTA, typename ConnectionTB>
-    connection_adapter_basic<ConnectionTA, ConnectionTB, custom::default_adapter_config>
+    connection_adapter_basic<ConnectionTA, ConnectionTB, custom::connection_asio_impl>
         make_connection_adapter(ConnectionTA &&connectionL, ConnectionTB &&connectionR)
     {
-        return connection_adapter_basic<ConnectionTA, ConnectionTB, custom::default_adapter_config>(
+        return connection_adapter_basic<ConnectionTA,
+                                        ConnectionTB,
+                                        custom::connection_asio_impl>(
             std::forward<ConnectionTA>(connectionL),
             std::forward<ConnectionTB>(connectionR));
     }

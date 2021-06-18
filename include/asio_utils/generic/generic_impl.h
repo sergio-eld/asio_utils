@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include "asio_utils/utility.h"
+
 namespace eld
 {
     namespace impl

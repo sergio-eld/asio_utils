@@ -1,15 +1,14 @@
 language: cpp
+addons:
+  apt:
+    packages:
+      - doxygen
+      - cmake
+      - googletest
+      - ninja-build
 before_script:
-  - sudo apt-get update -qq
-  - sudo apt-get install googletest -y
-  - sudo apt-get install cmake -y
-  - sudo apt-get install ninja-build -y
-  - cd /usr/src/googletest
-  - mkdir build
-  - cd build
-  - cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
-  - cmake --build . --target install
   - echo "deb http://archive.ubuntu.com/ubuntu xenial main universe" | sudo tee -a /etc/apt/sources.list
+  - sudo apt-get update -qq
   - cd $TRAVIS_BUILD_DIR
 script:
   - cmake .

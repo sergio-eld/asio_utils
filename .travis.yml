@@ -9,7 +9,7 @@ addons:
 before_script:
   - cd /usr/src/gtest
   - sudo mkdir build && cd build
-  - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release --verbose
+  - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
   - sudo cmake --install . --verbose
   - cd $TRAVIS_BUILD_DIR
 script:

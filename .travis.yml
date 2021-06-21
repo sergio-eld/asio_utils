@@ -1,7 +1,7 @@
 language: cpp
 before_script:
   - sudo apt-get update -qq
-  - sudo apt-get install libgtest-dev -y
+  - sudo apt-get install googletest -y
   - sudo apt-get install cmake -y
   - sudo apt-get install ninja-build -y
   - cd /usr/src/googletest

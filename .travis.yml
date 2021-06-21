@@ -7,7 +7,6 @@ addons:
     packages:
       - ninja-build
       - libasio-dev
-      - libgtest-dev
       - cmake
       - googletest
 before_script:

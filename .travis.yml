@@ -13,7 +13,7 @@ addons:
 before_script:
   - cd /usr/src/googletest
   - sudo mkdir build && cd build
-  - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DINSTALL_GTEST=ON
+  - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
   - sudo cmake --build . --target install
   - cd $TRAVIS_BUILD_DIR
 script:

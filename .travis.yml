@@ -5,12 +5,11 @@ addons:
       - ninja-build
       - libasio-dev
       - libgtest-dev
-      - cmake
 before_script:
   - cd /usr/src/gtest
   - sudo mkdir build && cd build
   - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
-  - sudo cmake --build .
+  - sudo cmake --install .
   - cd $TRAVIS_BUILD_DIR
 script:
   - mkdir build && cd build

@@ -1,0 +1,22 @@
+language: cpp
+
+dist: focal
+
+addons:
+  apt:
+    packages:
+      - ninja-build
+      - libasio-dev
+      - cmake
+      - googletest
+before_script:
+  - cd /usr/src/googletest
+  - sudo mkdir build && cd build
+  - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
+  - sudo cmake --build . --target install
+  - cd $TRAVIS_BUILD_DIR
+script:
+  - mkdir build && cd build
+  - cmake -GNinja ..
+  - ninja
+  - ctest

@@ -2,10 +2,10 @@
 
 #include <asio.hpp>
 
-#include <iostream>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <numeric>
 #include <vector>
 
@@ -65,6 +65,18 @@ namespace eld
                 composed_receive_data_tcp(Executor &&executor, CompletionHandlerT &&completion)
                   : acceptor_(std::forward<Executor>(executor),
                               { asio::ip::make_address_v4(localhost), port }),
+                    completion_(std::forward<CompletionHandlerT>(completion))
+                {
+                }
+
+                // TODO: make private/protected to prevent stack-allocation
+                template<typename Executor,
+                         typename CompletionHandlerT,
+                         typename = require_signature_t<completion_signature_t, CompletionHandlerT>>
+                composed_receive_data_tcp(Executor &&executor,
+                                          asio::ip::tcp::endpoint endpoint,
+                                          CompletionHandlerT &&completion)
+                  : acceptor_(std::forward<Executor>(executor), std::move(endpoint)),
                     completion_(std::forward<CompletionHandlerT>(completion))
                 {
                 }
@@ -217,7 +229,10 @@ namespace eld
         }
 
         template<typename CompletionToken, typename Executor>
-        auto async_receive_tcp(Executor &&executor, size_t expectedBytes, CompletionToken &&token)
+        auto async_receive_tcp(Executor &&executor,
+                               asio::ip::tcp::endpoint endpoint,
+                               size_t expectedBytes,
+                               CompletionToken &&token)
         {
             using asio::ip::tcp;
             using namespace detail;
@@ -235,10 +250,21 @@ namespace eld
 
             auto procedure =
                 std::make_shared<composed_procedure_t>(std::forward<Executor>(executor),
+                                                       std::move(endpoint),
                                                        std::move(completion));
             (*procedure)(expectedBytes, timeout);
 
             return result.get();
+        }
+
+        template<typename CompletionToken, typename Executor>
+        auto async_receive_tcp(Executor &&executor, size_t expectedBytes, CompletionToken &&token)
+        {
+            return async_receive_tcp(
+                std::forward<Executor>(executor),
+                asio::ip::tcp::endpoint(asio::ip::make_address_v4(localhost), port),
+                expectedBytes,
+                std::forward<CompletionToken>(token));
         }
 
         class receiver
@@ -366,12 +392,16 @@ namespace eld
             std::vector<size_t> lengths{};
 
             // sequence iterator that stores the beginning of the subsequence
-            auto subSeqBegin = begin, prev = begin, iter = begin;
+            auto subSeqBegin = begin,   //
+                prev = begin,           //
+                iter = begin;
 
             while (++iter != end)
             {
                 // if next is not greater than prev by one, start new chunk
-                const int prevVal = int(*prev), curVal = int(*iter), diff = curVal - prevVal;
+                const int prevVal = int(*prev),   //
+                    curVal = int(*iter),          //
+                    diff = curVal - prevVal;      //
                 if (diff != 1)
                 {
                     lengths.emplace_back(std::distance(subSeqBegin, iter));

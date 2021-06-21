@@ -39,7 +39,7 @@ namespace eld
     {
     };
 
-    chained_completion_t use_chained_completion;
+    constexpr chained_completion_t use_chained_completion;
 
     /*
      * 1) chain_handler invokes current node
@@ -691,12 +691,12 @@ namespace eld
      * - unrecoverable error has occurred (todo: to be specified)
      * - user has requested to stop via user provided callback stopOnError
      */
-    template<typename Connection>//, typename CompletionHandler>
+    template<typename Connection>   //, typename CompletionHandler>
     class async_send_queue
     {
     public:
         using connection_t = Connection;
-        using final_completion_t = std::function<void(asio::error_code)>; // CompletionHandler;
+        using final_completion_t = std::function<void(asio::error_code)>;   // CompletionHandler;
         using completion_signature_t = void(asio::error_code);
         using stop_on_error_signature_t = bool(const asio::error_code &, size_t);
         using send_completion_signature_t = void(const asio::error_code &, size_t);
@@ -944,7 +944,7 @@ namespace eld
         result_t result{ completion };
 
         return detail::get_combined(
-            async_send_queue<Connection/*, completion_t*/>(connection, std::move(completion)),
+            async_send_queue<Connection /*, completion_t*/>(connection, std::move(completion)),
             std::move(result));
     }
 

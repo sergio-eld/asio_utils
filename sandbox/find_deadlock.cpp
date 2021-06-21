@@ -20,7 +20,7 @@ void runContext(asio::io_context &io_context)
 
     std::cout << std::string("Stopping thread: ") + threadId + "\n";
     std::cout.flush();
-};
+}
 
 class server
 {
@@ -41,7 +41,7 @@ public:
         std::cout << "Start accepting\n";
         accepting_ = true;
         acceptor_.async_accept(
-            [this](const asio::error_code &errorCode, asio::ip::tcp::socket peer)
+            [this](const asio::error_code &errorCode, asio::ip::tcp::socket /*peer*/)
             {
                 std::cout << "accepted: " << errorCode.message() << " "
                           << std::this_thread::get_id() << std::endl;

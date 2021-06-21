@@ -229,7 +229,7 @@ namespace eld
         {
             impl_.async_send(get_destination_connection(DirectionTag()),
                              asio::buffer(get_buffer(DirectionTag()).data(), bytesReceived),
-                             [this](const error_type &errorCode, size_t bytesSent)
+                             [this](const error_type &errorCode, size_t /*bytesSent*/)
                              {
                                std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
 

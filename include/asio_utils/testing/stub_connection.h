@@ -69,7 +69,7 @@ namespace eld
                 timerSend_.async_wait(
                     [completion = std::move(completion),
                      constBuffer = std::forward<ConstBuffer>(constBuffer),
-                     this](const asio::error_code &errorCode) mutable
+                     this](const asio::error_code &/*errorCode*/) mutable
                     {
                         const auto *pData = static_cast<const uint8_t*>(constBuffer.data());
                         const size_t size = constBuffer.size();

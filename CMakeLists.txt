@@ -6,7 +6,30 @@ project(asio_connection_tools LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
+option(CLEAN_BUILD "Treat all warnings as errors" ON)
 option(BUILD_TESTS "Build Tests" ON)
+
+if (MSVC)
+    add_compile_options(/W4)
+    # warnings as errors
+    if (${CLEAN_BUILD})
+        add_compile_options(/WX)
+        #exclude deprecated
+        if (NOT ${ALLOW_DEPRECATED})
+            add_compile_options(-wd4996)
+        endif()
+    endif ()
+else ()
+    add_compile_options(-Wall -Wextra -pedantic)
+    # warnings as errors
+    if (${CLEAN_BUILD})
+        add_compile_options(-Werror)
+        # exclude deprecated
+        if (${ALLOW_DEPRECATED})
+            add_compile_options(-Wno-error=deprecated-declarations)
+        endif ()
+    endif ()
+endif ()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)
 

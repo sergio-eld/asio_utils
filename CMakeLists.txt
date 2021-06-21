@@ -37,6 +37,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)
 list(APPEND CMAKE_MODULE_PATH
         ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
+# TODO: add asio as submodule with version 1.18.2. Many things are not supported in 1.12
 find_package(ASIO REQUIRED)
 
 add_library(asio_utils INTERFACE)
@@ -57,12 +58,5 @@ if (NOT IS_EXCLUDED AND BUILD_TESTS)
     add_subdirectory(test)
 
     # sandbox
-    add_executable(sandbox sandbox/sandbox.cpp)
-    target_link_libraries(sandbox PRIVATE eld::asio_utils)
-
-    add_executable(sb.find_deadlock sandbox/find_deadlock.cpp)
-    target_link_libraries(sb.find_deadlock PRIVATE eld::asio_utils)
-
-    add_executable(example_6 sandbox/example_6.cpp)
-    target_link_libraries(example_6 PRIVATE eld::asio_utils)
+    add_subdirectory(sandbox)
 endif()

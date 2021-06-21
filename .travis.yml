@@ -4,7 +4,7 @@ addons:
     packages:
       - ninja-build
       - libasio-dev
-      - googletest
+      - libgtest-dev
 before_script:
   - cd /usr/src/googletest
   - mkdir build && cd build

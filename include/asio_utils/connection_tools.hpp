@@ -504,9 +504,6 @@ namespace eld
                                           infinite_attempts() :
                                           pImpl_->attempts_ - 1;
 
-            bool equalCode = errorCode.value() == asio::error::operation_aborted;
-            bool equalError = errorCode == asio::error::operation_aborted;
-
             if ((pImpl_->stopOnError_ &&
                  pImpl_->stopOnError_(errorCode == asio::error::operation_aborted ?
                                           // special case for operation_aborted on timer expiration

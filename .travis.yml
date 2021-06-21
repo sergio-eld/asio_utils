@@ -1,4 +1,7 @@
 language: cpp
+
+dist: bionic
+
 addons:
   apt:
     packages:
@@ -6,8 +9,9 @@ addons:
       - libasio-dev
       - libgtest-dev
       - cmake
+      - googletest
 before_script:
-  - cd /usr/src/gtest
+  - cd /usr/src/googletest
   - sudo mkdir build && cd build
   - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DINSTALL_GTEST=ON
   - sudo cmake --build . --target install

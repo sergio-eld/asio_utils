@@ -5,6 +5,7 @@ addons:
       - ninja-build
       - libasio-dev
       - libgtest-dev
+      - googletest
       - cmake
 before_script:
   - cd /usr/src/gtest

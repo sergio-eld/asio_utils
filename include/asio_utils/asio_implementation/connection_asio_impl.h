@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "asio_utils/traits.h"
 #include "asio_utils/generic/generic_impl.h"
 
 #include <asio.hpp>

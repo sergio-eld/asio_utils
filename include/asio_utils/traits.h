@@ -14,19 +14,4 @@ namespace eld
             using config_type = typename T::config_type;
         };
     }
-
-    /**
-     * Contains customization points with default implementations.
-     */
-    namespace custom
-    {
-        namespace detail
-        {
-
-
-        }
-
-        // TODO: add make_completion function
-
-    }
 }

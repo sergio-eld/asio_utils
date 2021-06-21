@@ -320,14 +320,25 @@ namespace eld
         implementation_type impl_;
     };
 
-    template<typename ConnectionTA, typename ConnectionTB, typename AdapterConfig>
-    connection_adapter_basic<ConnectionTA, ConnectionTB, AdapterConfig> make_connection_adapter(
+    template<typename ConnectionTA, typename ConnectionTB, typename ImplT>
+    connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(
         ConnectionTA &&connectionL,
         ConnectionTB &&connectionR,
-        AdapterConfig &&adapterConfig)
+        ImplT &&adapterConfig)
     {
-        return connection_adapter_basic<ConnectionTA, ConnectionTB, AdapterConfig>(
+        return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
             std::forward<ConnectionTA>(connectionL),
             std::forward<ConnectionTB>(connectionR));
+    }
+
+    template<typename ConnectionTA, typename ConnectionTB, typename ImplT,
+        typename =
+        typename std::enable_if<std::is_default_constructible<ConnectionTA>::value &&
+                                std::is_default_constructible<ConnectionTA>::value>::type>
+    connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(ImplT &&adapterConfig)
+    {
+        return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
+            std::forward<ConnectionTA>(ConnectionTA()),
+            std::forward<ConnectionTB>(ConnectionTB()));
     }
 }

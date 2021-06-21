@@ -7,10 +7,9 @@ addons:
       - libgtest-dev
       - cmake
 before_script:
-  - sudo apt-get intall googletest -y
   - cd /usr/src/gtest
   - sudo mkdir build && cd build
-  - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
+  - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DINSTALL_GTEST=ON
   - sudo cmake --install . --verbose
   - cd $TRAVIS_BUILD_DIR
 script:

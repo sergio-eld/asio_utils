@@ -73,13 +73,14 @@ namespace eld
         using config_type_a = typename traits::connection<connection_type_a>::config_type;
         using config_type_b = typename traits::connection<connection_type_b>::config_type;
 
-        template<typename = typename std::enable_if<util::conjunction<
-            std::is_default_constructible<connection_type_a>,
-            std::is_default_constructible<connection_type_b>,
-            std::is_default_constructible<implementation_type>>::value>::type>
-        constexpr connection_adapter_basic()
-        {
-        }
+        // does not compile!
+//        template<typename = typename std::enable_if<util::conjunction<
+//            std::is_default_constructible<connection_type_a>,
+//            std::is_default_constructible<connection_type_b>,
+//            std::is_default_constructible<implementation_type>>::value>::type>
+//        constexpr connection_adapter_basic()
+//        {
+//        }
 
         // TODO: hide?
         connection_adapter_basic(connection_adapter_basic &&) noexcept = default;
@@ -95,7 +96,7 @@ namespace eld
         template<typename ConfigTA, typename ConfigTB, typename CompletionT, typename DirectionTag>
         auto async_run(ConfigTA &&a_configFrom,
                        ConfigTB &&a_configTo,
-                       DirectionTag,
+                       DirectionTag directionTag,
                        CompletionT &&completionToken)
         {
             // TODO: create completion from impl_
@@ -106,15 +107,15 @@ namespace eld
             completion_t completion{ std::forward<CompletionT>(completionToken) };
             result_t result{ completion };
 
-            std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
-            const auto &currentState = get_state(DirectionTag());
+            std::lock_guard<std::mutex> lg{ get_mutex(directionTag) };
+            const auto &currentState = get_state(directionTag);
 
-            auto &connectionFrom = get_connection(DirectionTag());
+            auto &connectionFrom = get_source_connection(directionTag);
             const auto configFrom = std::forward<ConfigTA>(a_configFrom);
             const auto &configFromCurrent = implementation_type::get_config(connectionFrom);
 
             auto &connectionTo =
-                get_connection(direction::reverse(DirectionTag()));
+                get_destination_connection(directionTag);
             const auto configTo = std::forward<ConfigTB>(a_configTo);
             const auto &configToCurrent = implementation_type::get_config(connectionTo);
 
@@ -129,7 +130,8 @@ namespace eld
                 return result.get();
             }
 
-            stop_active_connection(DirectionTag());
+            if (currentState != connection_state::idle)
+                stop_active_connection(directionTag);
 
             if (!equalConfigsFrom)
                 impl_.configure(connectionFrom, configFrom);
@@ -137,11 +139,21 @@ namespace eld
             if (!equalConfigsTo)
                 impl_.configure(connectionTo, configTo);
 
-            currentState = connection_state::reading;
+            get_state(directionTag) = connection_state::reading;
             async_receive(DirectionTag());
 
             return result.get();
         }
+
+        template <typename DirectionTag, typename CompletionT>
+        auto async_run(DirectionTag directionTag, CompletionT &&completionToken)
+        {
+            return async_run(impl_.get_config(get_source_connection(directionTag)),
+                             impl_.get_config(get_destination_connection(directionTag)),
+                             directionTag,
+                             std::forward<CompletionT>(completionToken));
+        }
+
 
         template<typename DirectionTag>
         void stop(DirectionTag)
@@ -188,6 +200,7 @@ namespace eld
             auto &source = get_source_connection(DirectionTag());
             auto &destination = get_destination_connection(DirectionTag());
 
+            // TODO: don't use cancel, it will cancel ALL asynchronous operations for connection
             if (state_ == connection_state::reading)
                 impl_.cancel(source);
             else
@@ -197,13 +210,13 @@ namespace eld
         template<typename DirectionTag>
         void async_receive(DirectionTag)
         {
-            impl_.async_receive(get_connection(DirectionTag()),
+            impl_.async_receive(get_source_connection(DirectionTag()),
                                 asio::buffer(get_buffer(DirectionTag())),
                                 [this](const error_type &errorCode, size_t bytesRead)
                                 {
                                   std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
 
-                                  if (!handle_error(errorCode), DirectionTag())
+                                  if (!handle_error(errorCode, DirectionTag()))
                                       return;
 
                                   get_state(DirectionTag()) = connection_state::writing;
@@ -214,13 +227,13 @@ namespace eld
         template<typename DirectionTag>
         void async_send(size_t bytesReceived, DirectionTag)
         {
-            impl_.async_send(get_connection(direction::reverse(DirectionTag())),
+            impl_.async_send(get_destination_connection(DirectionTag()),
                              asio::buffer(get_buffer(DirectionTag()).data(), bytesReceived),
                              [this](const error_type &errorCode, size_t bytesSent)
                              {
                                std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
 
-                               if (!handle_error(errorCode), DirectionTag())
+                               if (!handle_error(errorCode, DirectionTag()))
                                    return;
 
                                get_state(DirectionTag()) = connection_state::reading;
@@ -305,8 +318,8 @@ namespace eld
             connection_type_a connectionA_;
             connection_type_b connectionB_;
 
-            typename implementation_type::buffer_type buffer_a_to_b_,   //
-            buffer_b_to_a_;
+            typename implementation_type::buffer_type buffer_a_to_b_{},   //
+            buffer_b_to_a_{};
 
             std::atomic<connection_state> state_a_to_b_{ connection_state::idle },   //
             state_b_to_a_{ connection_state::idle };
@@ -320,14 +333,25 @@ namespace eld
         implementation_type impl_;
     };
 
-    template<typename ConnectionTA, typename ConnectionTB, typename AdapterConfig>
-    connection_adapter_basic<ConnectionTA, ConnectionTB, AdapterConfig> make_connection_adapter(
+    template<typename ConnectionTA, typename ConnectionTB, typename ImplT>
+    connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(
         ConnectionTA &&connectionL,
         ConnectionTB &&connectionR,
-        AdapterConfig &&adapterConfig)
+        ImplT &&adapterConfig)
     {
-        return connection_adapter_basic<ConnectionTA, ConnectionTB, AdapterConfig>(
+        return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
             std::forward<ConnectionTA>(connectionL),
             std::forward<ConnectionTB>(connectionR));
+    }
+
+    template<typename ConnectionTA, typename ConnectionTB, typename ImplT,
+        typename =
+        typename std::enable_if<std::is_default_constructible<ConnectionTA>::value &&
+                                std::is_default_constructible<ConnectionTA>::value>::type>
+    connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(ImplT &&adapterConfig)
+    {
+        return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
+            std::forward<ConnectionTA>(ConnectionTA()),
+            std::forward<ConnectionTB>(ConnectionTB()));
     }
 }

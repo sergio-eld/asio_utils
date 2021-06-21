@@ -6,11 +6,7 @@ project(asio_connection_tools LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
-# disable tests and sandboxes if included as a sub_directory
-get_directory_property(hasParent PARENT_DIRECTORY)
-include(CMakeDependentOption)
-cmake_dependent_option(BUILD_TESTS "Build Tests" ON
-        "NOT hasParent" OFF)
+option(BUILD_TESTS "Build Tests" ON)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)
 
@@ -29,8 +25,10 @@ target_link_libraries(asio_utils INTERFACE ASIO::ASIO)
 
 add_library(eld::asio_utils ALIAS asio_utils)
 
+get_directory_property(IS_EXCLUDED EXCLUDE_FROM_ALL)
+
 # tests
-if (BUILD_TESTS)
+if (NOT IS_EXCLUDED AND BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
     enable_testing()
     add_subdirectory(test)

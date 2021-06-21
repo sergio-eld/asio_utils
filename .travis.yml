@@ -5,9 +5,9 @@ addons:
       - ninja-build
       - libasio-dev
       - libgtest-dev
-      - googletest
       - cmake
 before_script:
+  - sudo apt-get intall googletest -y
   - cd /usr/src/gtest
   - sudo mkdir build && cd build
   - sudo cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release

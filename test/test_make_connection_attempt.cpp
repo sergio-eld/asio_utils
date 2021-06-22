@@ -84,7 +84,7 @@ TEST(connection_attempt, 15_timeouts)
         socket,
         asio::ip::tcp::endpoint(asio::ip::make_address_v4(localhost), port),
         15,
-        std::chrono::milliseconds(20),
+        std::chrono::milliseconds(200),
         asio::use_future,
         [&timeouts](const asio::error_code &errorCode) -> bool
         {
@@ -109,7 +109,7 @@ TEST(connection_attempt, interrupted_infinite_attempts)
     std::future<void> res =
         eld::async_connection_attempt(socket,
                                       std::move(endpoint),
-                                      std::chrono::milliseconds(20),
+                                      std::chrono::milliseconds(200),
                                       asio::use_future,
                                       [&timeouts](const asio::error_code &errorCode) -> bool
                                       {

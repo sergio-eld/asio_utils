@@ -69,8 +69,14 @@ namespace eld
                 timerSend_.async_wait(
                     [completion = std::move(completion),
                      constBuffer = std::forward<ConstBuffer>(constBuffer),
-                     this](const asio::error_code &/*errorCode*/) mutable
+                     this](const asio::error_code &errorCode) mutable
                     {
+                        if (errorCode == asio::error::operation_aborted)
+                        {
+                            completion(asio::error::operation_aborted, 0);
+                            return;
+                        }
+
                         const auto *pData = static_cast<const uint8_t*>(constBuffer.data());
                         const size_t size = constBuffer.size();
 
@@ -85,7 +91,12 @@ namespace eld
 
             void cancel()
             {
-                // TODO: implement
+                timerSend_.cancel();
+                if (receiveHandler_)
+                {
+                    receiveHandler_(asio::error::operation_aborted, 0);
+                    receiveHandler_ = {};
+                }
             }
 
             // reading operator for async_receive
@@ -101,6 +112,7 @@ namespace eld
                 pReadBuffer_ = nullptr;
                 readBufferSize = 0;
 
+                assert(receiveHandler_ && "Invalid receive handler!");
                 receiveHandler_(asio::error_code(), received);
                 receiveHandler_ = {};
             }

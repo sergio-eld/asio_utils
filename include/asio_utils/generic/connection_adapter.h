@@ -7,6 +7,9 @@
 #include <memory>
 #include <mutex>
 
+// TODO: remove
+#include <iostream>
+
 namespace eld
 {
     namespace direction
@@ -39,15 +42,9 @@ namespace eld
         constexpr tag::a_to_b a_to_b{};
         constexpr tag::b_to_a b_to_a{};
 
-        constexpr tag::b_to_a reverse(tag::a_to_b)
-        {
-            return {};
-        }
+        constexpr tag::b_to_a reverse(tag::a_to_b) { return {}; }
 
-        constexpr tag::a_to_b reverse(tag::b_to_a)
-        {
-            return {};
-        }
+        constexpr tag::a_to_b reverse(tag::b_to_a) { return {}; }
 
     }
 
@@ -74,22 +71,22 @@ namespace eld
         using config_type_b = typename traits::connection<connection_type_b>::config_type;
 
         // does not compile!
-//        template<typename = typename std::enable_if<util::conjunction<
-//            std::is_default_constructible<connection_type_a>,
-//            std::is_default_constructible<connection_type_b>,
-//            std::is_default_constructible<implementation_type>>::value>::type>
-//        constexpr connection_adapter_basic()
-//        {
-//        }
+        //        template<typename = typename std::enable_if<util::conjunction<
+        //            std::is_default_constructible<connection_type_a>,
+        //            std::is_default_constructible<connection_type_b>,
+        //            std::is_default_constructible<implementation_type>>::value>::type>
+        //        constexpr connection_adapter_basic()
+        //        {
+        //        }
 
         // TODO: hide?
         connection_adapter_basic(connection_adapter_basic &&) noexcept = default;
 
         template<typename ConTA, typename ConTB, typename... ImplArgsT>
         connection_adapter_basic(ConTA &&connectionA, ConTB &&connectionB, ImplArgsT &&...implArgs)
-            : pImpl_(std::make_unique<state>(std::forward<ConTA>(connectionA),
-                                             std::forward<ConTB>(connectionB))),
-              impl_(std::forward<ImplArgsT>(implArgs)...)
+          : pImpl_(std::make_unique<state>(std::forward<ConTA>(connectionA),
+                                           std::forward<ConTB>(connectionB))),
+            impl_(std::forward<ImplArgsT>(implArgs)...)
         {
         }
 
@@ -101,51 +98,56 @@ namespace eld
         {
             // TODO: create completion from impl_
             using result_t =
-            asio::async_result<std::decay_t<CompletionT>, void(const error_type &)>;
+                asio::async_result<std::decay_t<CompletionT>, void(const error_type &)>;
             using completion_t = typename result_t::completion_handler_type;
 
             completion_t completion{ std::forward<CompletionT>(completionToken) };
             result_t result{ completion };
 
-            std::lock_guard<std::mutex> lg{ get_mutex(directionTag) };
-            const auto &currentState = get_state(directionTag);
-
-            auto &connectionFrom = get_source_connection(directionTag);
-            const auto configFrom = std::forward<ConfigTA>(a_configFrom);
-            const auto &configFromCurrent = implementation_type::get_config(connectionFrom);
-
-            auto &connectionTo =
-                get_destination_connection(directionTag);
-            const auto configTo = std::forward<ConfigTB>(a_configTo);
-            const auto &configToCurrent = implementation_type::get_config(connectionTo);
-
-            const bool equalConfigsFrom = impl_.compare_configs(configFrom, configFromCurrent),
-                equalConfigsTo = impl_.compare_configs(configTo, configToCurrent);
-
-            if (currentState != connection_state::idle &&   //
-                equalConfigsFrom &&                         //
-                equalConfigsTo)
             {
-                completion(impl::error::already_started());
-                return result.get();
+                std::lock_guard<std::mutex> lg{ get_mutex(directionTag) };
+                const auto &currentState = get_state(directionTag);
+
+                auto &connectionFrom = get_source_connection(directionTag);
+                const auto configFrom = std::forward<ConfigTA>(a_configFrom);
+                const auto &configFromCurrent = implementation_type::get_config(connectionFrom);
+
+                auto &connectionTo = get_destination_connection(directionTag);
+                const auto configTo = std::forward<ConfigTB>(a_configTo);
+                const auto &configToCurrent = implementation_type::get_config(connectionTo);
+
+                const bool equalConfigsFrom = impl_.compare_configs(configFrom, configFromCurrent),
+                    equalConfigsTo = impl_.compare_configs(configTo, configToCurrent);
+
+                if (currentState != connection_state::idle &&   //
+                    equalConfigsFrom &&                         //
+                    equalConfigsTo)
+                {
+                    completion(impl::error::already_started());
+                    return result.get();
+                }
+
+#pragma message "connection_adapter::async_run invalid implementation"
+                // TODO: this must call current completion handler
+                if (currentState != connection_state::idle)
+                    stop_active_connection(directionTag);
+
+                if (!equalConfigsFrom)
+                    impl_.configure(connectionFrom, configFrom);
+
+                if (!equalConfigsTo)
+                    impl_.configure(connectionTo, configTo);
+
+                pImpl_->completion_handler_ = std::move(completion);
+
+                get_state(directionTag) = connection_state::reading;
+                async_receive(DirectionTag());
             }
-
-            if (currentState != connection_state::idle)
-                stop_active_connection(directionTag);
-
-            if (!equalConfigsFrom)
-                impl_.configure(connectionFrom, configFrom);
-
-            if (!equalConfigsTo)
-                impl_.configure(connectionTo, configTo);
-
-            get_state(directionTag) = connection_state::reading;
-            async_receive(DirectionTag());
 
             return result.get();
         }
 
-        template <typename DirectionTag, typename CompletionT>
+        template<typename DirectionTag, typename CompletionT>
         auto async_run(DirectionTag directionTag, CompletionT &&completionToken)
         {
             return async_run(impl_.get_config(get_source_connection(directionTag)),
@@ -153,7 +155,6 @@ namespace eld
                              directionTag,
                              std::forward<CompletionT>(completionToken));
         }
-
 
         template<typename DirectionTag>
         void stop(DirectionTag)
@@ -166,6 +167,10 @@ namespace eld
         {
             auto futureAToB = sync_stop_connection(direction::a_to_b);
             auto futureBToA = sync_stop_connection(direction::b_to_a);
+
+            // TODO: make futures that wait in destructor
+            futureAToB.wait();
+            futureBToA.wait();
         }
 
     private:
@@ -260,10 +265,10 @@ namespace eld
                    "Unexpected connection state");
 
             if (get_state(DirectionTag()) == connection_state::reading ?
-                impl_.remote_host_has_disconnected(get_source_connection(DirectionTag()),
-                                                   errorCode) :
-                impl_.remote_host_has_disconnected(get_destination_connection(DirectionTag()),
-                                                   errorCode))
+                    impl_.remote_host_has_disconnected(get_source_connection(DirectionTag()),
+                                                       errorCode) :
+                    impl_.remote_host_has_disconnected(get_destination_connection(DirectionTag()),
+                                                       errorCode))
             {
                 get_state(DirectionTag()) = connection_state::idle;
 
@@ -294,11 +299,11 @@ namespace eld
 
             pImpl_->completion_handler_ =
                 [completionHandler = std::move(pImpl_->completion_handler_),
-                    sharedPromise](const error_type &errorCode) mutable
-                {
-                  sharedPromise->set_value();
-                  completionHandler(errorCode);
-                };
+                 sharedPromise](const error_type &errorCode) mutable
+            {
+                sharedPromise->set_value();
+                completionHandler(errorCode);
+            };
 
             stop_active_connection(DirectionTag());
             return future;
@@ -310,8 +315,8 @@ namespace eld
         {
             template<typename ConTA, typename ConTB>
             state(ConTA &&connectionA, ConTB &&connectionB)
-                : connectionA_(std::forward<ConTA>(connectionA)),
-                  connectionB_(std::forward<ConTB>(connectionB))
+              : connectionA_(std::forward<ConTA>(connectionA)),
+                connectionB_(std::forward<ConTB>(connectionB))
             {
             }
 
@@ -319,12 +324,12 @@ namespace eld
             connection_type_b connectionB_;
 
             typename implementation_type::buffer_type buffer_a_to_b_{},   //
-            buffer_b_to_a_{};
+                buffer_b_to_a_{};
 
             std::atomic<connection_state> state_a_to_b_{ connection_state::idle },   //
-            state_b_to_a_{ connection_state::idle };
+                state_b_to_a_{ connection_state::idle };
             std::mutex mutex_a_to_b_,   //
-            mutex_b_to_a_;
+                mutex_b_to_a_;
 
             std::function<void(const error_type &)> completion_handler_;
         };
@@ -337,18 +342,21 @@ namespace eld
     connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(
         ConnectionTA &&connectionL,
         ConnectionTB &&connectionR,
-        ImplT &&adapterConfig)
+        ImplT &&/*adapterConfig*/)
     {
         return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
             std::forward<ConnectionTA>(connectionL),
             std::forward<ConnectionTB>(connectionR));
     }
 
-    template<typename ConnectionTA, typename ConnectionTB, typename ImplT,
-        typename =
-        typename std::enable_if<std::is_default_constructible<ConnectionTA>::value &&
-                                std::is_default_constructible<ConnectionTA>::value>::type>
-    connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(ImplT &&adapterConfig)
+    template<typename ConnectionTA,
+             typename ConnectionTB,
+             typename ImplT,
+             typename =
+                 typename std::enable_if<std::is_default_constructible<ConnectionTA>::value &&
+                                         std::is_default_constructible<ConnectionTA>::value>::type>
+    connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(
+        ImplT &&/*adapterConfig*/)
     {
         return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
             std::forward<ConnectionTA>(ConnectionTA()),

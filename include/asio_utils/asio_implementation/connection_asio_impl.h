@@ -16,15 +16,27 @@ namespace eld
             remote_endpoint;
     };
 
+    constexpr inline bool operator==(const udp_socket_config& lhv, const udp_socket_config &rhv)
+    {
+        return std::tie(lhv.local_endpoint, lhv.remote_endpoint) ==
+            std::tie(rhv.local_endpoint, rhv.remote_endpoint);
+    }
+
     struct tcp_socket_config
     {
         asio::ip::tcp::endpoint local_endpoint,   //
             remote_endpoint;
     };
 
+    constexpr inline bool operator==(const tcp_socket_config& lhv, const tcp_socket_config &rhv)
+    {
+        return std::tie(lhv.local_endpoint, lhv.remote_endpoint) ==
+               std::tie(rhv.local_endpoint, rhv.remote_endpoint);
+    }
+
     struct serial_port_config
     {
-//        std::string device_name; // is this necessary for reconfiguration?
+        //        std::string device_name; // is this necessary for reconfiguration?
         asio::serial_port::baud_rate baud_rate;
         asio::serial_port::flow_control flow_control;
         asio::serial_port::parity parity;
@@ -171,7 +183,21 @@ namespace eld
         template<>
         tcp_socket_config connection_asio_impl::get_config(const asio::ip::tcp::socket &connection)
         {
-            return { connection.local_endpoint(), connection.remote_endpoint() };
+            // workaround for socket that has not been connected yet
+            asio::error_code ec{};
+            auto localEndpoint = connection.local_endpoint(ec);
+            if (ec == asio::error::bad_descriptor)
+                localEndpoint = asio::ip::tcp::endpoint();
+            else
+                throw asio::system_error(ec);
+
+            auto remoteEndpoint = connection.remote_endpoint(ec);
+            if (ec == asio::error::bad_descriptor)
+                remoteEndpoint = asio::ip::tcp::endpoint();
+            else
+                throw asio::system_error(ec);
+
+            return { std::move(localEndpoint), std::move(remoteEndpoint) };
         }
 
         // TODO: check this implementation
@@ -179,6 +205,9 @@ namespace eld
         void connection_asio_impl::configure(asio::ip::tcp::socket &socket,
                                              const tcp_socket_config &config)
         {
+            // TODO: is it necessary to close?
+            if (!socket.is_open())
+                socket.open(config.local_endpoint.protocol());
             socket.bind(config.local_endpoint);
             socket.connect(config.remote_endpoint);
         }
@@ -186,13 +215,31 @@ namespace eld
         template<>
         udp_socket_config connection_asio_impl::get_config(const asio::ip::udp::socket &connection)
         {
-            return { connection.local_endpoint(), connection.remote_endpoint() };
+            // workaround for socket that has not been connected yet
+            asio::error_code ec{};
+            auto localEndpoint = connection.local_endpoint(ec);
+            if (ec == asio::error::bad_descriptor)
+                localEndpoint = asio::ip::udp::endpoint();
+            else
+                throw asio::system_error(ec);
+
+            auto remoteEndpoint = connection.remote_endpoint(ec);
+            if (ec == asio::error::bad_descriptor)
+                remoteEndpoint = asio::ip::udp::endpoint();
+            else
+                throw asio::system_error(ec);
+
+            return { std::move(localEndpoint), std::move(remoteEndpoint) };
         }
 
         template<>
         void connection_asio_impl::configure(asio::ip::udp::socket &socket,
                                              const udp_socket_config &config)
         {
+            // TODO: is it necessary to close?
+            if (!socket.is_open())
+                socket.open(config.local_endpoint.protocol());
+
             socket.bind(config.local_endpoint);
             socket.connect(config.remote_endpoint);
         }
@@ -212,10 +259,11 @@ namespace eld
 
         // TODO: is it necessary to close serial port to change the settings?
         template<>
-        void connection_asio_impl::configure(asio::serial_port &serialPort, const serial_port_config& config)
+        void connection_asio_impl::configure(asio::serial_port &serialPort,
+                                             const serial_port_config &config)
         {
-//            if (serialPort.is_open())
-//                serialPort.close();
+            //            if (serialPort.is_open())
+            //                serialPort.close();
 
             serialPort.set_option(config.baud_rate);
             serialPort.set_option(config.flow_control);
@@ -223,7 +271,7 @@ namespace eld
             serialPort.set_option(config.stop_bits);
             serialPort.set_option(config.character_size);
 
-//            serialPort.open();
+            //            serialPort.open();
         }
 
     }

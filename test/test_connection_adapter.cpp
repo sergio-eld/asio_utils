@@ -104,6 +104,72 @@ TEST(connection_adapter, stub_connection)
     ASSERT_EQ(send, receive);
 }
 
+TEST(connection_adapter, tcp_to_udp)
+{
+    using namespace e_testing;
+
+    constexpr const char localhost[] = "127.0.0.1";
+
+    std::vector<uint32_t> send(size_t(512)),   //
+        receive(size_t(512));
+
+    std::iota(send.begin(), send.end(), 0);
+
+    asio::thread_pool context{ 2 };
+
+    eld::tcp_socket_config tcpSocketConfig{
+        asio::ip::tcp::endpoint{ asio::ip::make_address_v4(localhost), 200 },
+        asio::ip::tcp::endpoint{ asio::ip::make_address_v4(localhost), 300 }
+    };
+
+    asio::ip::tcp::acceptor remoteAcceptor{ context, tcpSocketConfig.remote_endpoint };
+    asio::ip::tcp::socket remoteSocket{ context };
+
+    // wait for connection and then send bytes
+    remoteAcceptor.async_accept(
+        remoteSocket,
+        [&remoteSocket,
+         &send](const asio::error_code &errorCode) {   //
+            EXPECT_TRUE(!errorCode);
+            remoteSocket.async_send(
+                asio::buffer(send),
+                [bytesToSend = send.size()](const asio::error_code &errorCode, size_t bytesSent)
+                {
+                    EXPECT_TRUE(!errorCode);
+                    EXPECT_EQ(bytesToSend * sizeof(uint32_t), bytesSent);
+                });
+        });
+
+    // udp receiver
+    eld::udp_socket_config udpSocketConfig{
+        asio::ip::udp::endpoint{ asio::ip::make_address_v4(localhost), 400 },
+        asio::ip::udp::endpoint{ asio::ip::make_address_v4(localhost), 500 },
+    };
+
+    asio::ip::udp::socket udpSocketReceiver{ context, udpSocketConfig.remote_endpoint };
+    udpSocketReceiver.connect(udpSocketConfig.local_endpoint);
+    auto futureReceive = udpSocketReceiver.async_receive(asio::buffer(receive), asio::use_future);
+
+    {
+        auto adapter = eld::make_connection_adapter(asio::ip::tcp::socket(context),
+                                                    asio::ip::udp::socket(context));
+        adapter.async_run(tcpSocketConfig,
+                          udpSocketConfig,
+                          eld::direction::a_to_b,
+                          [](const asio::error_code &errorCode) {   //
+                              EXPECT_EQ(errorCode, asio::error_code());
+                          });
+
+        futureReceive.get();
+//        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::cout << "Data has been received" << std::endl;
+    }
+
+    std::cout << "end of receiving data" << std::endl;
+
+    ASSERT_EQ(send, receive);
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

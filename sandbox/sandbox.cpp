@@ -1,7 +1,7 @@
 ﻿
-#include "asio_utils/testing/test_utils.h"
 #include "asio_utils/connection_adapter.hpp"
 #include "asio_utils/connection_tools.hpp"
+#include "asio_utils/testing/test_utils.h"
 
 #include <numeric>
 
@@ -46,18 +46,20 @@ int main()
     struct StubConnectionA
     {
         using config_type = double;
-        void cancel(){}
-
+        void cancel() {}
     };
 
     struct StubConnectionB
     {
         using config_type = double;
-        void cancel(){}
-
+        void cancel() {}
     };
 
+    asio::io_context ioContext;
+
     auto adapter = eld::make_connection_adapter(StubConnectionA(), StubConnectionB());
+    auto tcpUdpAdapter = eld::make_connection_adapter(asio::ip::udp::socket(ioContext),
+                                                      asio::ip::tcp::socket(ioContext));
 
     return 0;
 }

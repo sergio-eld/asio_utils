@@ -3,12 +3,57 @@
 #include "asio_utils/generic/generic_impl.h"
 #include "asio_utils/traits.h"
 
-#include <memory>
-
 #include <asio.hpp>
+
+#include <memory>
+#include <string>
 
 namespace eld
 {
+    struct udp_socket_config
+    {
+        asio::ip::udp::endpoint local_endpoint,   //
+            remote_endpoint;
+    };
+
+    struct tcp_socket_config
+    {
+        asio::ip::tcp::endpoint local_endpoint,   //
+            remote_endpoint;
+    };
+
+    struct serial_port_config
+    {
+//        std::string device_name; // is this necessary for reconfiguration?
+        asio::serial_port::baud_rate baud_rate;
+        asio::serial_port::flow_control flow_control;
+        asio::serial_port::parity parity;
+        asio::serial_port::stop_bits stop_bits;
+        asio::serial_port::character_size character_size;
+    };
+
+    namespace traits
+    {
+        template<>
+        struct connection<asio::ip::udp::socket>
+        {
+            using config_type = eld::udp_socket_config;
+        };
+
+        template<>
+        struct connection<asio::ip::tcp::socket>
+        {
+            using config_type = eld::tcp_socket_config;
+        };
+
+        template<>
+        struct connection<asio::serial_port>
+        {
+            using config_type = serial_port_config;
+        };
+
+    }
+
     namespace impl_asio
     {
         namespace traits
@@ -122,5 +167,64 @@ namespace eld
                                              std::forward<CompletionT>(completion));
             }
         };
+
+        template<>
+        tcp_socket_config connection_asio_impl::get_config(const asio::ip::tcp::socket &connection)
+        {
+            return { connection.local_endpoint(), connection.remote_endpoint() };
+        }
+
+        // TODO: check this implementation
+        template<>
+        void connection_asio_impl::configure(asio::ip::tcp::socket &socket,
+                                             const tcp_socket_config &config)
+        {
+            socket.bind(config.local_endpoint);
+            socket.connect(config.remote_endpoint);
+        }
+
+        template<>
+        udp_socket_config connection_asio_impl::get_config(const asio::ip::udp::socket &connection)
+        {
+            return { connection.local_endpoint(), connection.remote_endpoint() };
+        }
+
+        template<>
+        void connection_asio_impl::configure(asio::ip::udp::socket &socket,
+                                             const udp_socket_config &config)
+        {
+            socket.bind(config.local_endpoint);
+            socket.connect(config.remote_endpoint);
+        }
+
+        template<>
+        serial_port_config connection_asio_impl::get_config(const asio::serial_port &serialPort)
+        {
+            serial_port_config config;
+            serialPort.get_option(config.baud_rate);
+            serialPort.get_option(config.flow_control);
+            serialPort.get_option(config.parity);
+            serialPort.get_option(config.stop_bits);
+            serialPort.get_option(config.character_size);
+
+            return config;
+        }
+
+        // TODO: is it necessary to close serial port to change the settings?
+        template<>
+        void connection_asio_impl::configure(asio::serial_port &serialPort, const serial_port_config& config)
+        {
+//            if (serialPort.is_open())
+//                serialPort.close();
+
+            serialPort.set_option(config.baud_rate);
+            serialPort.set_option(config.flow_control);
+            serialPort.set_option(config.parity);
+            serialPort.set_option(config.stop_bits);
+            serialPort.set_option(config.character_size);
+
+//            serialPort.open();
+        }
+
     }
 }

@@ -21,6 +21,7 @@ find_path(ASIO_INCLUDE_DIR asio.hpp
         /opt/csw/include # Blastwave
         /opt/include
         /usr/freeware/include
+        NO_DEFAULT_PATH
         )
 
 include(FindPackageHandleStandardArgs)

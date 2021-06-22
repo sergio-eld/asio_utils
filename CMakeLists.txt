@@ -31,6 +31,7 @@ else ()
     endif ()
 endif ()
 
+# cmake macros and functions
 include(cmake/git_submodules.cmake)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)

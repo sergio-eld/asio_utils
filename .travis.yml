@@ -6,7 +6,6 @@ addons:
   apt:
     packages:
       - ninja-build
-      - libasio-dev
       - cmake
       - googletest
 before_script:
@@ -17,6 +16,6 @@ before_script:
   - cd $TRAVIS_BUILD_DIR
 script:
   - mkdir build && cd build
-  - cmake -GNinja ..
+  - cmake -GNinja .. -DCMAKE_BUILD_TYPE=Release
   - ninja
-  - ctest
+  - ctest --output-on-failure

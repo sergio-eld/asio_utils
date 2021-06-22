@@ -35,10 +35,10 @@ if (${ASIO_FOUND})
         set_target_properties(ASIO::ASIO PROPERTIES
                 INTERFACE_COMPILE_DEFINITIONS "ASIO_STANDALONE"
                 INTERFACE_INCLUDE_DIRECTORIES ${ASIO_INCLUDE_DIR})
+        target_link_libraries(ASIO::ASIO INTERFACE Threads::Threads)
 
         if(WIN32)
             target_link_libraries(ASIO::ASIO INTERFACE
-                    Threads::Threads
                     ws2_32.lib
                     mswsock.lib
                     )

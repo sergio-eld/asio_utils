@@ -31,13 +31,16 @@ else ()
     endif ()
 endif ()
 
+include(cmake/git_submodules.cmake)
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)
 
 # FindXXX.cmake scripts for external packages
 list(APPEND CMAKE_MODULE_PATH
         ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
-# TODO: add asio as submodule with version 1.18.2. Many things are not supported in 1.12
+# add asio as submodule with version 1.18.2. Many things are not supported in 1.12
+set(ASIO_ROOT ${CMAKE_SOURCE_DIR}/3rdparty/asio/asio)
 find_package(ASIO REQUIRED)
 
 add_library(asio_utils INTERFACE)

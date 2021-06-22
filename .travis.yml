@@ -17,5 +17,5 @@ before_script:
 script:
   - mkdir build && cd build
   - cmake -GNinja .. -DCMAKE_BUILD_TYPE=Release
-  - ninja
-  - ctest --output-on-failure
+  - cmake --build .
+  - sudo ctest --output-on-failure

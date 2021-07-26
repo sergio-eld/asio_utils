@@ -3,6 +3,10 @@
 #include "asio_utils/traits.h"
 #include "asio_utils/utility.h"
 
+#include <type_traits>
+
+#include <functional>
+
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -12,6 +16,340 @@
 
 namespace eld
 {
+    namespace custom
+    {
+        template<typename T>
+        void cancel(T &t)
+        {
+            t.cancel();
+        }
+
+        /**
+         * Customization point to get current config.
+         * @tparam T
+         * @param t
+         * @return
+         */
+        template<typename T>
+        constexpr auto config(const T &t)
+        {
+            return t.config();
+        }
+
+        template<typename ImplT, typename CompletionT>
+        constexpr auto make_completion(ImplT &impl, CompletionT &&completion)
+        {
+            return impl.make_completion(std::forward<CompletionT>(completion));
+        }
+
+        /**
+         * Customization point for asynchronous receive command.
+         * @tparam BufferT
+         * @tparam CompletionT
+         * @tparam ConnectionT
+         * @param connection
+         * @param buffer
+         * @param completion
+         * @return
+         */
+        template<typename BufferT, typename CompletionT, typename ConnectionT>
+        constexpr auto async_receive(ConnectionT &connection,
+                                     BufferT &&buffer,
+                                     CompletionT &&completion) noexcept
+        {
+            return connection.async_receive(std::forward<BufferT>(buffer),
+                                            std::forward<CompletionT>(completion));
+        }
+
+        /**
+         * Customization point for asynchronous send command.
+         * Asynchronously sends the whole contents of the given buffer.
+         * @tparam ConstBufferT
+         * @tparam CompletionT
+         * @tparam ConnectionT
+         * @param connection
+         * @param constBuffer
+         * @param completion
+         * @return
+         */
+        template<typename ConstBufferT, typename CompletionT, typename ConnectionT>
+        constexpr auto async_send(ConnectionT &connection,
+                                  ConstBufferT &&constBuffer,
+                                  CompletionT &&completion) noexcept
+        {
+            return connection.async_send(std::forward<ConstBufferT>(constBuffer),
+                                         std::forward<CompletionT>(completion));
+        }
+
+        template<typename ImplT, typename DirectionTagT>
+        constexpr auto get_const_buffer(const ImplT &impl, DirectionTagT directionTag)
+        {
+            return impl.const_buffer(directionTag);
+        }
+
+        template<typename ImplT, typename DirectionTagT>
+        constexpr auto get_mutable_buffer(ImplT &impl, DirectionTagT directionTag)
+        {
+            return impl.mutable_buffer(directionTag);
+        }
+
+        template<typename ImplT,
+                 typename ErrorT,
+                 typename TransferTypeT,
+                 typename ConfigFromT,
+                 typename ConfigToT>
+        constexpr bool transfer_interrupted(const ImplT &impl,
+                                            ErrorT &&error,
+                                            size_t bytesTransferred,
+                                            TransferTypeT transferType,
+                                            const ConfigFromT &configConnectionFrom,
+                                            const ConfigToT &configConnectionTo)
+        {
+            return impl.transfer_interrupted(std::forward<ErrorT>(error),
+                                             bytesTransferred,
+                                             transferType,
+                                             configConnectionFrom,
+                                             configConnectionTo);
+        }
+
+    }
+
+    namespace detail
+    {
+        namespace detail
+        {
+            template<class T, class Tuple, std::size_t... I>
+            constexpr T make_from_tuple_impl(Tuple &&t, std::index_sequence<I...>)
+            {
+                static_assert(
+                    std::is_constructible<T, decltype(std::get<I>(std::declval<Tuple>()))...>(),
+                    "T is not constructible from given Tuple");
+                return T(std::get<I>(std::forward<Tuple>(t))...);
+            }
+        }   // namespace detail
+
+        template<class T, class Tuple>
+        constexpr T make_from_tuple(Tuple &&t)
+        {
+            return detail::make_from_tuple_impl<T>(
+                std::forward<Tuple>(t),
+                std::make_index_sequence<std::tuple_size<std::remove_reference_t<Tuple>>::value>{});
+        }
+    }
+
+    namespace tag
+    {
+        struct direction_a_to_b_t
+        {
+        };
+        struct direction_b_to_a_t
+        {
+        };
+        struct direction_both_t
+        {
+        };
+    }
+
+    constexpr tag::direction_a_to_b_t direction_a_to_b;
+    constexpr tag::direction_b_to_a_t direction_b_to_a;
+    constexpr tag::direction_both_t direction_both;
+
+    enum class transfer_type
+    {
+        send,
+        receive
+    };
+
+    namespace generic
+    {
+        /**
+         * \todo List of steps where a error can occur.
+         *      - Per direction:
+         *          - error on send
+         *          - error on receive
+         * Connection adapter Class.
+         * @tparam ConnectionA
+         * @tparam ConnectionB
+         * @tparam DirectionT
+         */
+        template<typename ConnectionA, typename ConnectionB, typename DirectionT, typename ImplT>
+        class connection_adapter
+        {
+        public:
+            using connection_a_type = ConnectionA;
+            using connection_b_type = ConnectionB;
+
+            using direction_type = DirectionT;
+            using implementation_t = ImplT;
+
+            template<
+                typename TupleParamsA,
+                typename TupleParamsB,
+                bool DefaultConstructibleImpl = std::is_default_constructible<implementation_t>(),
+                typename std::enable_if<DefaultConstructibleImpl, int>::type * = nullptr>
+            connection_adapter(TupleParamsA &&tupleParamsA, TupleParamsB &&tupleParamsB)
+              : connectionA_(detail::make_from_tuple<connection_a_type>(tupleParamsA)),
+                connectionB_(detail::make_from_tuple<connection_b_type>(tupleParamsB)),
+                impl_()
+            {
+                async_run(direction_type());
+            }
+
+            template<typename TupleParamsA, typename TupleParamsB, typename TupleBufferParams>
+            connection_adapter(TupleParamsA &&tupleArgsA,
+                               TupleParamsB &&tupleArgsB,
+                               TupleBufferParams &&tupleImplArgs)
+              : connectionA_(detail::make_from_tuple<connection_a_type>(tupleArgsA)),
+                connectionB_(detail::make_from_tuple<connection_b_type>(tupleArgsB)),
+                impl_(detail::make_from_tuple<implementation_t>(tupleImplArgs))
+            {
+                async_run(direction_type());
+            }
+
+            // TODO: can a move constructor be used in a running state?
+            connection_adapter(connection_adapter &&) noexcept = default;
+            connection_adapter &operator=(connection_adapter &&) = delete;
+
+            connection_adapter(const connection_adapter &) = delete;
+            connection_adapter &operator=(const connection_adapter &) = delete;
+
+            void cancel()
+            {
+                custom::cancel(connectionA_);
+                custom::cancel(connectionB_);
+            }
+
+            constexpr auto config_a() const { return custom::config(connectionA_); }
+
+            constexpr auto config_b() const { return custom::config(connectionB_); }
+
+            // Do I need this?
+            bool stopped() const { return !running_; }
+
+            // Does it have to be public?
+            template<typename CompletionT>
+            auto stopped(CompletionT &&completionToken)
+            {
+                auto &&completion =
+                    custom::make_completion(impl_, std::forward<CompletionT>(completionToken));
+                onStopped_ = [handler = std::move(completion.handler)] { handler(); };
+
+                return completion.result.get();
+            }
+
+            ~connection_adapter()
+            {
+                // TODO: use traits customization
+                stopped(impl_.use_future).wait();
+            }
+
+        private:
+            connection_a_type &get_connection_from(tag::direction_a_to_b_t) { return connectionA_; }
+            connection_b_type &get_connection_to(tag::direction_a_to_b_t) { return connectionB_; }
+
+            connection_b_type &get_connection_from(tag::direction_b_to_a_t) { return connectionB_; }
+            connection_a_type &get_connection_to(tag::direction_b_to_a_t) { return connectionA_; }
+
+            template<typename DirectionTagT>
+            void async_receive(DirectionTagT directionTag)
+            {
+                custom::async_receive(
+                    get_connection_from(directionTag),
+                    custom::get_mutable_buffer(impl_, directionTag),
+                    [this](const auto &error, size_t bytesTransferred)
+                    {
+                        const auto &configFrom =
+                            custom::config(get_connection_from(DirectionTagT()));
+                        const auto &configTo = custom::config(get_connection_to(DirectionTagT()));
+                        using transfer_type =
+                            std::integral_constant<transfer_type, transfer_type::receive>;
+
+                        if (!custom::transfer_interrupted(impl_,
+                                                          error,
+                                                          bytesTransferred,
+                                                          transfer_type(),
+                                                          configFrom,
+                                                          configTo))
+                            return async_send(DirectionTagT());
+
+                        // TODO: thread safety
+                        // TODO: set stopped
+                        if (onStopped_)
+                        {
+                            onStopped_();
+                            onStopped_ = {};
+                        }
+                    });
+            }
+
+            template<typename DirectionTagT>
+            void async_send(DirectionTagT directionTag)
+            {
+                custom::async_send(
+                    get_connection_to(directionTag),
+                    custom::get_const_buffer(impl_, directionTag),
+                    [this](const auto &error, size_t bytesTransferred)
+                    {
+                        const auto &configFrom =
+                            custom::config(get_connection_from(DirectionTagT()));
+                        const auto &configTo = custom::config(get_connection_to(DirectionTagT()));
+                        using transfer_type =
+                            std::integral_constant<transfer_type, transfer_type::send>;
+
+                        if (!custom::transfer_interrupted(impl_,
+                                                          error,
+                                                          bytesTransferred,
+                                                          transfer_type(),
+                                                          configFrom,
+                                                          configTo))
+                            return async_receive(DirectionTagT());
+
+                        // TODO: thread safety
+                        // TODO: set stopped
+                        if (onStopped_)
+                        {
+                            onStopped_();
+                            onStopped_ = {};
+                        }
+                    });
+            }
+
+            template<typename DirectionTagT>
+            void async_run(DirectionTagT directionTag)
+            {
+                async_receive(directionTag);
+            }
+
+            void async_run(tag::direction_both_t)
+            {
+                async_run(direction_a_to_b);
+                async_run(direction_b_to_a);
+            }
+
+        private:
+            connection_a_type connectionA_;
+            connection_b_type connectionB_;
+            std::atomic_bool running_;
+
+            implementation_t impl_;
+            std::function<void()> onStopped_;
+        };
+
+    }
+
+    template<typename ConnectionA,
+             typename ConnectionB,
+             typename DirectionTag,
+             typename TupleParamsA,
+             typename TupleParamsB,
+             typename CompletionT>
+    auto make_connection_adapter(DirectionTag directionTag,
+                                 TupleParamsA &&tupleParamsA,
+                                 TupleParamsB &&tupleParamsB,
+                                 CompletionT &&completionToken)
+    {
+    }
+
     namespace direction
     {
         namespace tag
@@ -117,7 +455,7 @@ namespace eld
                 const auto &configToCurrent = implementation_type::get_config(connectionTo);
 
                 const bool equalConfigsFrom = impl_.compare_configs(configFrom, configFromCurrent),
-                    equalConfigsTo = impl_.compare_configs(configTo, configToCurrent);
+                           equalConfigsTo = impl_.compare_configs(configTo, configToCurrent);
 
                 if (currentState != connection_state::idle &&   //
                     equalConfigsFrom &&                         //
@@ -219,13 +557,13 @@ namespace eld
                                 asio::buffer(get_buffer(DirectionTag())),
                                 [this](const error_type &errorCode, size_t bytesRead)
                                 {
-                                  std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
+                                    std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
 
-                                  if (!handle_error(errorCode, DirectionTag()))
-                                      return;
+                                    if (!handle_error(errorCode, DirectionTag()))
+                                        return;
 
-                                  get_state(DirectionTag()) = connection_state::writing;
-                                  async_send(bytesRead, DirectionTag());
+                                    get_state(DirectionTag()) = connection_state::writing;
+                                    async_send(bytesRead, DirectionTag());
                                 });
         }
 
@@ -236,13 +574,13 @@ namespace eld
                              asio::buffer(get_buffer(DirectionTag()).data(), bytesReceived),
                              [this](const error_type &errorCode, size_t /*bytesSent*/)
                              {
-                               std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
+                                 std::lock_guard<std::mutex> lg{ get_mutex(DirectionTag()) };
 
-                               if (!handle_error(errorCode, DirectionTag()))
-                                   return;
+                                 if (!handle_error(errorCode, DirectionTag()))
+                                     return;
 
-                               get_state(DirectionTag()) = connection_state::reading;
-                               async_receive(DirectionTag());
+                                 get_state(DirectionTag()) = connection_state::reading;
+                                 async_receive(DirectionTag());
                              });
         }
 
@@ -342,7 +680,7 @@ namespace eld
     connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(
         ConnectionTA &&connectionL,
         ConnectionTB &&connectionR,
-        ImplT &&/*adapterConfig*/)
+        ImplT && /*adapterConfig*/)
     {
         return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
             std::forward<ConnectionTA>(connectionL),
@@ -356,7 +694,7 @@ namespace eld
                  typename std::enable_if<std::is_default_constructible<ConnectionTA>::value &&
                                          std::is_default_constructible<ConnectionTA>::value>::type>
     connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT> make_connection_adapter(
-        ImplT &&/*adapterConfig*/)
+        ImplT && /*adapterConfig*/)
     {
         return connection_adapter_basic<ConnectionTA, ConnectionTB, ImplT>(
             std::forward<ConnectionTA>(ConnectionTA()),

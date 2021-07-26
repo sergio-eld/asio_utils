@@ -8,10 +8,10 @@ namespace eld
 {
     namespace traits
     {
-        template<typename T>
+        template <typename T>
         struct connection
         {
-            using config_type = typename T::config_type;
+            using traits = typename T::traits;
         };
     }
 }
